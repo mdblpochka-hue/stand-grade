@@ -1,0 +1,51 @@
+# Зависимости
+node_modules/
+.pnp
+.pnp.js
+
+# Сборка
+dist/
+build/
+
+# Переменные окружения и секреты
+.env
+.env.*
+!.env.example
+data/session.secret
+
+# Локальное состояние игры (создаётся/пишется в рантайме)
+data/*
+!data/.gitkeep
+
+# Логи
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Кеши и временные файлы
+.cache/
+.temp/
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+.vite/
+
+# Python (утилиты/скрипты, если появятся)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Редакторы и ОС
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

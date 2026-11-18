@@ -1,0 +1,60 @@
+# Деплой STAND GRADE
+
+Проект — это Express-сервер, который раздаёт собранный React-фронтенд из `dist/`
+и хранит состояние в JSON-файле. Поэтому рекомендуемая площадка — **Render**
+(нужен постоянный процесс и файловое хранилище).
+
+## Переменные окружения
+
+| Переменная | Обязательна | Назначение |
+|---|---|---|
+| `PORT` | выдаёт хостинг | Порт HTTP-сервера (локально по умолчанию `3001`). |
+| `SESSION_SECRET` | да, на проде | Секрет подписи токенов. Длинная случайная строка. |
+| `DATA_DIR` | желательно | Папка для `store.json` и `session.secret` (на Render — `/var/data`). |
+| `PLAYER_PASSWORD` | нет | Пароль `player` при первом создании базы (по умолчанию `player`). |
+| `ADMIN_PASSWORD` | нет | Пароль `admin` при первом создании базы (по умолчанию `rainy`). |
+| `ADMIN_START_BALANCE` | нет | Стартовый баланс админа (по умолчанию `100000`). |
+
+Сгенерировать секрет:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+```
+
+## Render (рекомендуется)
+
+1. Залей репозиторий на GitHub/GitLab и создай **Web Service** из него.
+   Если есть `render.yaml`, Render подхватит настройки автоматически (**New → Blueprint**).
+2. Вручную настройки сервиса:
+   - **Runtime:** Node
+   - **Build Command:** `npm ci && npm run build`
+   - **Start Command:** `npm start`
+   - **Health Check Path:** `/api/health`
+3. Environment → добавь `SESSION_SECRET` (Generate), `DATA_DIR=/var/data`,
+   при желании `PLAYER_PASSWORD` и `ADMIN_PASSWORD`.
+4. **Disk** (только платный план): mount path `/var/data`, 1 GB.
+   Без диска данные живут в эфемерной ФС и сбрасываются при рестарте/деплое.
+5. Deploy. Приложение будет доступно по адресу `https://<service>.onrender.com`.
+
+## Vercel
+
+Vercel плохо подходит для этого проекта: он рассчитан на serverless-функции,
+а здесь долгоживущий Express-сервер с записью состояния в файл. ФС на Vercel
+только для чтения (кроме `/tmp`, который не сохраняется между вызовами),
+поэтому `store.json` будет теряться, а разные инстансы — расходиться.
+
+Если всё же нужен Vercel, придётся:
+- вынести состояние в внешнюю БД (Postgres/Upstash/Redis);
+- обернуть Express в `api/index.js` с `export default app` и rewrite `/(.*)`;
+- убрать `app.listen` для serverless-окружения.
+
+Для демо-прототипа проще и надёжнее Render.
+
+## Локальная проверка перед деплоем
+
+```bash
+npm ci
+npm run build
+PORT=3001 NODE_ENV=production SESSION_SECRET=<hex> npm start
+# открой http://localhost:3001 и проверь /api/health
+```
