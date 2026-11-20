@@ -4222,7 +4222,7 @@ function LoginScreen({ onLogin, notice }) {
               </div>
 
               <p className="mt-4 text-center text-[8px] leading-relaxed text-white/20">
-                Скрытый admin-аккаунт не отображается в интерфейсе. Демо-проект, реальные платежи отключены.
+                Скрытые аккаунты owner и admin не отображаются в интерфейсе. Демо-проект, реальные платежи отключены.
               </p>
             </div>
           </div>

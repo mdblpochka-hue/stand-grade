@@ -1219,6 +1219,8 @@ function onlineCount() {
 let liveFeed = []
 
 function pushLiveDrop(user, skin, source = 'case') {
+  // Скрытые аккаунты (owner/admin) не светятся в публичной ленте дропов.
+  if (user.role === 'owner' || user.role === 'admin') return
   liveFeed.unshift({
     id: crypto.randomUUID(),
     userName: user.username,
