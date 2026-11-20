@@ -1051,7 +1051,7 @@ function Header({
               title={item.label}
               aria-label={item.label}
               className={cx(
-                'group flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] font-bold transition',
+                'group relative flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] font-bold transition',
                 activeSection === item.id
                   ? 'bg-acid/[0.09] text-white'
                   : 'text-white/48 hover:bg-white/[0.04] hover:text-white',
@@ -1060,9 +1060,10 @@ function Header({
               <Icon
                 name={item.icon}
                 size={13}
-                className={
-                  activeSection === item.id ? 'text-acid' : 'text-white/28 group-hover:text-acid/70'
-                }
+                className={cx(
+                  'nav-icon',
+                  activeSection === item.id ? 'text-acid' : 'text-white/28 group-hover:text-acid/70',
+                )}
               />
               <span className="hidden xl:inline">{item.label}</span>
               {item.id === 'promos' && promoBadge > 0 && (
@@ -1070,6 +1071,9 @@ function Header({
                   !
                 </span>
               )}
+              <span className="nav-tip xl:hidden" aria-hidden="true">
+                <span className="nav-tip-text">{item.label}</span>
+              </span>
             </button>
           ))}
           <button
@@ -1094,7 +1098,7 @@ function Header({
             title="Настройки"
             aria-label="Настройки"
             className={cx(
-              'group flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] font-bold transition',
+              'group relative flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] font-bold transition',
               activeSection === 'settings'
                 ? 'bg-acid/[0.09] text-white'
                 : 'text-white/48 hover:bg-white/[0.04] hover:text-white',
@@ -1103,9 +1107,15 @@ function Header({
             <Icon
               name="settings"
               size={13}
-              className={activeSection === 'settings' ? 'text-acid' : 'text-white/28 group-hover:text-acid/70'}
+              className={cx(
+                'nav-icon',
+                activeSection === 'settings' ? 'text-acid' : 'text-white/28 group-hover:text-acid/70',
+              )}
             />
             <span className="hidden xl:inline">Настройки</span>
+            <span className="nav-tip xl:hidden" aria-hidden="true">
+              <span className="nav-tip-text">Настройки</span>
+            </span>
           </button>
         </nav>
 

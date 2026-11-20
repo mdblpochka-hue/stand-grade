@@ -438,6 +438,92 @@ select:focus-visible {
   animation: promo-badge-pulse 1.8s ease-out infinite;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Animated navigation tooltips                                       */
+/* ------------------------------------------------------------------ */
+
+.nav-icon {
+  transition: transform 0.32s cubic-bezier(0.2, 0.9, 0.2, 1), filter 0.28s ease;
+}
+
+.group:hover .nav-icon,
+.group:focus-visible .nav-icon {
+  transform: translateY(-2px) scale(1.14);
+  filter: drop-shadow(0 0 7px rgba(53, 255, 135, 0.5));
+}
+
+.nav-tip {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 10px);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 11px;
+  border-radius: 9px;
+  border: 1px solid rgba(53, 255, 135, 0.28);
+  background: rgba(8, 18, 12, 0.97);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  color: #d9ffe9;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -8px) scale(0.9);
+  filter: blur(4px);
+  transition: opacity 0.3s ease, transform 0.38s cubic-bezier(0.16, 1, 0.3, 1), filter 0.3s ease;
+}
+
+.nav-tip::before {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  transform: translateX(-50%) rotate(45deg);
+  background: rgba(8, 18, 12, 0.97);
+  border-left: 1px solid rgba(53, 255, 135, 0.28);
+  border-top: 1px solid rgba(53, 255, 135, 0.28);
+}
+
+.group:hover .nav-tip,
+.group:focus-visible .nav-tip {
+  opacity: 1;
+  transform: translate(-50%, 0) scale(1);
+  filter: blur(0);
+}
+
+.nav-tip-text {
+  display: inline-block;
+}
+
+.group:hover .nav-tip-text,
+.group:focus-visible .nav-tip-text {
+  animation: nav-tip-roll 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes nav-tip-roll {
+  0% {
+    letter-spacing: 0.3em;
+    opacity: 0.2;
+    transform: translateY(3px);
+  }
+  60% {
+    letter-spacing: 0.1em;
+    opacity: 1;
+  }
+  100% {
+    letter-spacing: 0.12em;
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
