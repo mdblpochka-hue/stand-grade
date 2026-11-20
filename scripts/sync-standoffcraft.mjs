@@ -1,61 +1,21 @@
 /*
- * Синхронизация каталога и кейсов со StandoffCraft.
+ * Синхронизация каталога StandoffCraft.
  *
- * Публичные данные: https://standoffcraft.com/api/skins и /api/cases.
- * Скрипт сохраняет снимок в server-data/standoffcraft.js, чтобы приложение
- * не зависело от сети во время работы. Запуск: npm run sync:standoffcraft
+ * Публичные данные: https://standoffcraft.com/api/skins.
+ * Сохраняем снимок в server-data/standoffcraft.js, чтобы приложению не нужен
+ * был доступ к API во время работы. Кейсы — собственные, тематические
+ * STAND GRADE, они описаны в server.js.
+ *
+ * Запуск: npm run sync:standoffcraft
  */
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const API = 'https://standoffcraft.com'
-const PAGE_SIZE = 200
+const PAGE_SIZE = 100
 const OUT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'server-data')
 const OUT_FILE = path.join(OUT_DIR, 'standoffcraft.js')
-
-const SELECTED_CASES = [
-  'sidearm',
-  'silencer',
-  'deagle',
-  'chameleon',
-  'valor',
-  'origin',
-  'assault',
-  'claws',
-  'barbed-wire',
-  'camo',
-  'sniper',
-  'monster',
-  'frostfire',
-  'gloves',
-  'blade',
-  'obsidian',
-  'millionaire',
-  'ruby',
-  'emerald',
-  'brilliant',
-  'nameless',
-  'all-in',
-]
-
-const ACCENTS = [
-  '#71ff9f',
-  '#9dff5e',
-  '#4da3ff',
-  '#b777ff',
-  '#ffc857',
-  '#ff5d8f',
-  '#35ffc9',
-  '#e8ff7a',
-  '#ff8a3d',
-  '#7dffea',
-  '#ff6cbd',
-  '#c3ff5e',
-  '#ffd54a',
-  '#8b5cf6',
-  '#f6fffb',
-]
 
 const NON_WEAPON = new Set([
   '',
@@ -77,18 +37,6 @@ const WEAPON_TYPES = new Set([
   'HE', 'Thermite',
 ])
 
-// В API встречаются перевёрнутые поля (weapon:"Twilight", name:"Butterfly").
-function orientSkin(skin) {
-  const weapon = String(skin.weapon || '').trim()
-  const name = String(skin.name || '').trim()
-  const swapped = WEAPON_TYPES.has(name) && !WEAPON_TYPES.has(weapon)
-  const resultWeapon = swapped ? name : weapon
-  return {
-    weapon: resultWeapon === 'M9' ? 'M9 Bayonet' : resultWeapon,
-    name: swapped ? weapon : name,
-  }
-}
-
 function isValidItem(skin) {
   if (!skin || !skin.name) return false
   if (!Number.isFinite(Number(skin.price)) || Number(skin.price) <= 0) return false
@@ -102,6 +50,18 @@ function isWeaponItem(skin) {
     return false
   }
   return true
+}
+
+// В API встречаются перевёрнутые поля (weapon:"Twilight", name:"Butterfly").
+function orientSkin(skin) {
+  const weapon = String(skin.weapon || '').trim()
+  const name = String(skin.name || '').trim()
+  const swapped = WEAPON_TYPES.has(name) && !WEAPON_TYPES.has(weapon)
+  const resultWeapon = swapped ? name : weapon
+  return {
+    weapon: resultWeapon === 'M9' ? 'M9 Bayonet' : resultWeapon,
+    name: swapped ? weapon : name,
+  }
 }
 
 function displayName(skin) {
@@ -143,65 +103,11 @@ async function fetchAllSkins() {
 async function main() {
   console.log('Fetching StandoffCraft catalog...')
   const rawSkins = await fetchAllSkins()
-  const rawById = new Map(rawSkins.map((skin) => [skin.id, skin]))
 
-  console.log('Fetching StandoffCraft cases...')
-  const casesData = await fetchJson(`${API}/api/cases`)
-  const allCases = new Map((casesData.cases || []).map((box) => [box.slug, box]))
-
-  const selected = []
-  for (const slug of SELECTED_CASES) {
-    const box = allCases.get(slug)
-    if (!box) {
-      console.warn(`  ! case ${slug} not found`)
-      continue
-    }
-
-    const items = (box.items || [])
-      .filter((item) => Number(item.chance) > 0 && isValidItem(item.skin))
-      .map((item) => ({
-        skinId: item.skinId,
-        chance: Number(item.chance),
-        skin: item.skin,
-      }))
-
-    const chanceSum = items.reduce((sum, item) => sum + item.chance, 0)
-    if (items.length < 2 || chanceSum <= 0) {
-      console.warn(`  ! case ${slug} skipped: too few items`)
-      continue
-    }
-
-    const normalized = items.map((item) => ({
-      skinId: item.skinId,
-      chance: Math.round((item.chance / chanceSum) * 1000000) / 10000,
-    }))
-
-    selected.push({
-      id: box.slug,
-      slug: box.slug,
-      name: box.name,
-      nameEn: box.nameEn || '',
-      price: Number(box.price) || 0,
-      previewImage: box.previewPath || '',
-      items: normalized,
-    })
-    console.log(`  + ${slug}: ${normalized.length} items, ${chanceSum.toFixed(1)}% kept`)
-  }
-
-  const caseItemIds = new Set()
-  for (const box of selected) {
-    for (const item of box.items) caseItemIds.add(item.skinId)
-  }
-
-  // Каталог: все оружейные скины, все предметы из выбранных кейсов,
-  // а также дорогие стикеры/брелоки/агенты/кейсы и прочие коллекционные вещи.
+  // Каталог: все оружейные скины + дорогие не-скины (стикеры, брелоки,
+  // агенты, кейсы и т.п.). Кейсы STAND GRADE собираются отдельно.
   const catalog = rawSkins
-    .filter((skin) => {
-      if (!isValidItem(skin)) return false
-      if (caseItemIds.has(skin.id)) return true
-      if (isWeaponItem(skin)) return true
-      return Number(skin.price) >= 1000
-    })
+    .filter((skin) => isValidItem(skin) && (isWeaponItem(skin) || Number(skin.price) >= 1000))
     .map((skin) => {
       const oriented = orientSkin(skin)
       return {
@@ -220,52 +126,17 @@ async function main() {
     })
     .sort((a, b) => a.price - b.price)
 
-  const catalogById = new Map(catalog.map((skin) => [skin.id, skin]))
-  const cases = selected
-    .map((box, index) => {
-      const items = box.items.filter((item) => catalogById.has(item.skinId))
-      const top = items
-        .map((item) => catalogById.get(item.skinId))
-        .sort((a, b) => b.price - a.price)[0]
-      return {
-        ...box,
-        items,
-        featuredSkinId: top?.id || items[0]?.skinId || null,
-        accent: ACCENTS[index % ACCENTS.length],
-        kicker: String(box.name || box.slug).toUpperCase(),
-        subtitle: 'Standoff 2 · реальные шансы',
-        source: 'standoffcraft',
-      }
-    })
-    .filter((box) => box.items.length >= 2)
-
-  const missing = []
-  for (const box of cases) {
-    for (const item of box.items) {
-      if (!catalogById.has(item.skinId)) missing.push(item.skinId)
-    }
-  }
-  if (missing.length) {
-    console.warn(`  ! ${new Set(missing).size} case item ids missing from catalog`)
-  }
-
-  const payload = {
-    meta: {
-      source: 'https://standoffcraft.com',
-      fetchedAt: new Date().toISOString(),
-      catalogSize: catalog.length,
-      caseCount: cases.length,
-      selectedCases: cases.map((box) => box.slug),
-    },
-    skins: catalog,
-    cases,
+  const meta = {
+    source: 'https://standoffcraft.com',
+    fetchedAt: new Date().toISOString(),
+    catalogSize: catalog.length,
   }
 
   await fs.mkdir(OUT_DIR, { recursive: true })
-  const banner = `/* AUTO-GENERATED by scripts/sync-standoffcraft.mjs on ${payload.meta.fetchedAt}. Do not edit manually. */\n`
-  const body = `export const STANDOFFCRAFT_META = ${JSON.stringify(payload.meta, null, 2)}\n\nexport const STANDOFFCRAFT_SKINS = ${JSON.stringify(catalog, null, 2)}\n\nexport const STANDOFFCRAFT_CASES = ${JSON.stringify(cases, null, 2)}\n`
+  const banner = `/* AUTO-GENERATED by scripts/sync-standoffcraft.mjs on ${meta.fetchedAt}. Do not edit manually. */\n`
+  const body = `export const STANDOFFCRAFT_META = ${JSON.stringify(meta, null, 2)}\n\nexport const STANDOFFCRAFT_SKINS = ${JSON.stringify(catalog, null, 2)}\n`
   await fs.writeFile(OUT_FILE, banner + body, 'utf8')
-  console.log(`\nSaved ${catalog.length} skins and ${cases.length} cases -> ${OUT_FILE}`)
+  console.log(`\nSaved ${catalog.length} catalog items -> ${OUT_FILE}`)
 }
 
 main().catch((error) => {

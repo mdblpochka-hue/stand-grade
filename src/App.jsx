@@ -1484,7 +1484,8 @@ function CaseCard({ caseData, onOpen, index, user, now }) {
 
         <div className="mt-3 flex items-center justify-between gap-2">
           <span className="text-[9px] font-semibold text-white/26">
-            {caseData.contents.length} {plural(caseData.contents.length, ['предмет', 'предмета', 'предметов'])}
+            {caseData.totalItems || caseData.contents.length}{' '}
+            {plural(caseData.totalItems || caseData.contents.length, ['предмет', 'предмета', 'предметов'])}
           </span>
           <span className="flex items-center gap-1.5 text-[9px] font-bold text-white/36">
             <Icon name="shield" size={11} className="text-acid/50" />
@@ -4242,7 +4243,7 @@ function LoginScreen({ onLogin, notice }) {
           <div className="mt-8 grid max-w-[570px] grid-cols-3 gap-2">
             {[
               ['15K', 'дневной лимит', 'gift'],
-              ['23', 'кейса', 'box'],
+              ['15', 'кейсов', 'box'],
               ['1500+', 'предметов', 'coin'],
             ].map(([value, label, icon]) => (
               <div key={label} className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-3.5">
@@ -4682,8 +4683,8 @@ function CaseModal({
                     ? `Следующее открытие через ${formatCountdown(freeCooldownIn)}`
                     : 'Бесплатное открытие · раз в 24 часа'
                   : `Цена открытия ${formatPrice(caseData.price)}`}{' '}
-                · {caseData.contents.length}{' '}
-                {plural(caseData.contents.length, ['предмет', 'предмета', 'предметов'])}
+                · {caseData.totalItems || caseData.contents.length}{' '}
+                {plural(caseData.totalItems || caseData.contents.length, ['предмет', 'предмета', 'предметов'])}
               </div>
             </div>
           </div>
@@ -5205,6 +5206,13 @@ function CaseModal({
                   ))}
                 </div>
               </div>
+
+              {caseData.totalItems > caseData.contents.length && (
+                <div className="mt-2 text-[8px] font-semibold text-white/22">
+                  Показаны {caseData.contents.length} из {caseData.totalItems} предметов. Полный пул
+                  используется при открытии кейса.
+                </div>
+              )}
 
               <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {caseData.contents.map((skin) => {
