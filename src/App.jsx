@@ -1098,7 +1098,6 @@ function Header({
               key={item.id}
               type="button"
               onClick={() => onNavigate(item.id)}
-              title={item.label}
               aria-label={item.label}
               className={cx(
                 'group relative flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] font-bold transition',
@@ -1115,13 +1114,12 @@ function Header({
                   activeSection === item.id ? 'text-acid' : 'text-white/28 group-hover:text-acid/70',
                 )}
               />
-              <span className="hidden xl:inline">{item.label}</span>
               {item.id === 'promos' && promoBadge > 0 && (
                 <span className="promo-badge flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ffcf4d] px-1 text-[9px] font-black text-[#241a00]">
                   !
                 </span>
               )}
-              <span className="nav-tip xl:hidden" aria-hidden="true">
+              <span className="nav-tip" aria-hidden="true">
                 <span className="nav-tip-text">{item.label}</span>
               </span>
             </button>
@@ -1129,23 +1127,28 @@ function Header({
           <button
             type="button"
             onClick={onHistory}
-            className="group hidden items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-bold text-white/48 transition hover:bg-white/[0.04] hover:text-white 2xl:flex"
+            aria-label="История"
+            className="group relative flex items-center rounded-lg px-2.5 py-2 font-bold text-white/48 transition hover:bg-white/[0.04] hover:text-white"
           >
-            <Icon name="history" size={14} className="text-white/28 group-hover:text-acid/70" />
-            История
+            <Icon name="history" size={13} className="nav-icon text-white/28 group-hover:text-acid/70" />
+            <span className="nav-tip" aria-hidden="true">
+              <span className="nav-tip-text">История</span>
+            </span>
           </button>
           <button
             type="button"
             onClick={onStore}
-            className="group hidden items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-bold text-white/48 transition hover:bg-white/[0.04] hover:text-white 2xl:flex"
+            aria-label="Магазин"
+            className="group relative flex items-center rounded-lg px-2.5 py-2 font-bold text-white/48 transition hover:bg-white/[0.04] hover:text-white"
           >
-            <Icon name="bag" size={14} className="text-white/28 group-hover:text-acid/70" />
-            Магазин
+            <Icon name="bag" size={13} className="nav-icon text-white/28 group-hover:text-acid/70" />
+            <span className="nav-tip" aria-hidden="true">
+              <span className="nav-tip-text">Магазин</span>
+            </span>
           </button>
           <button
             type="button"
             onClick={onSettings}
-            title="Настройки"
             aria-label="Настройки"
             className={cx(
               'group relative flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] font-bold transition',
@@ -1162,8 +1165,7 @@ function Header({
                 activeSection === 'settings' ? 'text-acid' : 'text-white/28 group-hover:text-acid/70',
               )}
             />
-            <span className="hidden xl:inline">Настройки</span>
-            <span className="nav-tip xl:hidden" aria-hidden="true">
+            <span className="nav-tip" aria-hidden="true">
               <span className="nav-tip-text">Настройки</span>
             </span>
           </button>
