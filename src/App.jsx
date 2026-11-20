@@ -476,6 +476,21 @@ const WEAPON_KIND = {
   'Dual Daggers': 'kunai',
   SM1014: 'rifle',
   M60: 'rifle',
+  MP5: 'smg',
+  MAC10: 'smg',
+  'TEC-9': 'pistol',
+  M110: 'sniper',
+  VAL: 'rifle',
+  Mallard: 'shotgun',
+  Berettas: 'pistol',
+  'Akimbo Uzi': 'smg',
+  SPAS: 'shotgun',
+  'FN FAL': 'rifle',
+  'F/S': 'smg',
+  Flash: 'pistol',
+  Molotov: 'pistol',
+  M9: 'bayonet',
+  Butterfly: 'butterfly',
 }
 
 function getPalette(skin) {
@@ -787,7 +802,14 @@ function RarityBadge({ rarity, className = '', showDot = true }) {
 }
 
 function SkinVisual({ skin, className = '', artClassName = '', showRarity = true }) {
-  const meta = RARITY[skin.rarity] || RARITY.Common
+  const meta = RARITY[skin?.rarity] || RARITY.Common
+  const [imageFailed, setImageFailed] = useState(false)
+  const image = skin?.image
+
+  useEffect(() => {
+    setImageFailed(false)
+  }, [image])
+
   return (
     <div
       className={cx('relative overflow-hidden', className)}
@@ -802,7 +824,24 @@ function SkinVisual({ skin, className = '', artClassName = '', showRarity = true
         className="absolute left-1/2 top-1/2 h-28 w-36 -translate-x-1/2 -translate-y-1/2 rounded-full opacity-30 blur-3xl"
         style={{ backgroundColor: meta.color }}
       />
-      <WeaponArt skin={skin} className={cx('absolute left-1/2 top-1/2 w-[94%] -translate-x-1/2 -translate-y-1/2', artClassName)} />
+      {image && !imageFailed ? (
+        <img
+          src={image}
+          alt={skin.name}
+          loading="lazy"
+          decoding="async"
+          onError={() => setImageFailed(true)}
+          className={cx(
+            'absolute left-1/2 top-1/2 max-h-[86%] max-w-[94%] -translate-x-1/2 -translate-y-1/2 object-contain drop-shadow-[0_12px_20px_rgba(0,0,0,.55)]',
+            artClassName,
+          )}
+        />
+      ) : (
+        <WeaponArt
+          skin={skin}
+          className={cx('absolute left-1/2 top-1/2 w-[94%] -translate-x-1/2 -translate-y-1/2', artClassName)}
+        />
+      )}
       <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-[#070b08]/60 to-transparent" />
       {showRarity && (
         <div className="absolute left-2 top-2">
@@ -839,12 +878,23 @@ function CaseCrate({ accent = '#35ff87', skin, className = '' }) {
 
   return (
     <div className={cx('relative flex items-center justify-center', className)}>
-      {skin && (
-        <WeaponArt
-          skin={skin}
-          className="absolute -right-3 top-2 w-24 rotate-[8deg] opacity-25 blur-[0.2px] transition duration-500 group-hover:-translate-y-1 group-hover:opacity-45 sm:w-28"
-        />
-      )}
+      {skin &&
+        (skin.image ? (
+          <img
+            src={skin.image}
+            alt={skin.name}
+            loading="lazy"
+            onError={(event) => {
+              event.currentTarget.style.display = 'none'
+            }}
+            className="absolute -right-3 top-2 w-24 rotate-[8deg] object-contain opacity-25 blur-[0.2px] transition duration-500 group-hover:-translate-y-1 group-hover:opacity-45 sm:w-28"
+          />
+        ) : (
+          <WeaponArt
+            skin={skin}
+            className="absolute -right-3 top-2 w-24 rotate-[8deg] opacity-25 blur-[0.2px] transition duration-500 group-hover:-translate-y-1 group-hover:opacity-45 sm:w-28"
+          />
+        ))}
       <div
         className="absolute left-1/2 top-1/2 h-36 w-48 -translate-x-1/2 -translate-y-1/2 rounded-full opacity-35 blur-3xl"
         style={{ backgroundColor: accent }}
@@ -3982,7 +4032,8 @@ function Footer({ onHistory, onNavigate, onStore }) {
           <Logo />
           <p className="mt-3 max-w-sm text-[9px] leading-relaxed text-white/25">
             Демонстрационный прототип. Виртуальная голда и скины не имеют реальной стоимости. Реальные платежи,
-            вывод предметов и торговая площадка отключены.
+            вывод предметов и торговая площадка отключены. Каталог, цены и изображения предметов — публичные данные
+            StandoffCraft.
           </p>
         </div>
         <div className="grid grid-cols-2 gap-x-10 gap-y-2 text-[9px] font-semibold text-white/28 sm:grid-cols-3">
@@ -4139,8 +4190,8 @@ function LoginScreen({ onLogin, notice }) {
           <div className="mt-8 grid max-w-[570px] grid-cols-3 gap-2">
             {[
               ['15K', 'дневной лимит', 'gift'],
-              ['15', 'кейсов', 'box'],
-              ['45', 'скинов', 'coin'],
+              ['16', 'кейсов', 'box'],
+              ['360+', 'скинов', 'coin'],
             ].map(([value, label, icon]) => (
               <div key={label} className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-3.5">
                 <div className="flex items-center justify-between">
@@ -5207,7 +5258,7 @@ function StoreModal({ catalog, balance, token, onClose, onUpdate, onToast }) {
                 Магазин скинов
               </h2>
               <div className="mt-0.5 text-[9px] font-semibold text-white/28">
-                {catalog.length} предметов · моментальная выдача в инвентарь
+                {catalog.length} предметов · реальные цены Standoff 2
               </div>
             </div>
           </div>

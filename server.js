@@ -3,6 +3,11 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import {
+  STANDOFFCRAFT_CASES,
+  STANDOFFCRAFT_META,
+  STANDOFFCRAFT_SKINS,
+} from './server-data/standoffcraft.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -64,7 +69,12 @@ fs.mkdirSync(DATA_DIR, { recursive: true })
 /*  Skin catalog                                                       */
 /* ------------------------------------------------------------------ */
 
-const SKINS = [
+/*
+ * Старый демо-каталог оставлен только для совместимости с уже выданными
+ * предметами. В кейсах, магазине и апгрейде используется реальный каталог
+ * StandoffCraft (см. server-data/standoffcraft.js).
+ */
+const LEGACY_SKINS = [
   // Common
   { id: 'g22-pixel-camo', name: 'G22 Pixel Camouflage', weapon: 'G22', rarity: 'Common', price: 0.2 },
   { id: 'p350-savannah', name: 'P350 Savannah', weapon: 'P350', rarity: 'Common', price: 0.3 },
@@ -213,7 +223,26 @@ const SKINS = [
   { id: 'm9-treasure-hunter', name: 'M9 Bayonet Treasure Hunter', weapon: 'M9 Bayonet', rarity: 'Nameless', price: 38000 },
 ]
 
-const SKIN_BY_ID = new Map(SKINS.map((skin) => [skin.id, skin]))
+const REAL_SKINS = STANDOFFCRAFT_SKINS
+const SKINS = REAL_SKINS
+
+function normalizeSkinName(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-zа-я0-9]+/gi, ' ')
+    .trim()
+}
+
+const SKIN_BY_ID = new Map([...LEGACY_SKINS, ...REAL_SKINS].map((skin) => [skin.id, skin]))
+const REAL_BY_NAME = new Map(REAL_SKINS.map((skin) => [normalizeSkinName(skin.name), skin]))
+
+// Старые предметы с тем же названием автоматически становятся реальными
+// скинами Standoff 2 (с актуальной ценой и иконкой).
+const LEGACY_SKIN_MAP = new Map()
+for (const legacy of LEGACY_SKINS) {
+  const match = REAL_BY_NAME.get(normalizeSkinName(legacy.name))
+  if (match) LEGACY_SKIN_MAP.set(legacy.id, match.id)
+}
 
 // Старые id из ранних версий демо — переносим инвентарь без потери предметов.
 const LEGACY_ID_MAP = {
@@ -234,21 +263,28 @@ const LEGACY_ID_MAP = {
 }
 
 function resolveSkinId(skinId) {
-  if (SKIN_BY_ID.has(skinId)) return skinId
-  const migrated = LEGACY_ID_MAP[skinId]
-  return migrated && SKIN_BY_ID.has(migrated) ? migrated : null
+  const direct = LEGACY_SKIN_MAP.get(skinId) || skinId
+  if (SKIN_BY_ID.has(direct)) return direct
+  const migrated = LEGACY_ID_MAP[skinId] || LEGACY_ID_MAP[direct]
+  const mapped = migrated ? LEGACY_SKIN_MAP.get(migrated) || migrated : null
+  return mapped && SKIN_BY_ID.has(mapped) ? mapped : null
 }
+
+console.log(
+  `StandoffCraft catalog: ${STANDOFFCRAFT_META.catalogSize} skins, ${STANDOFFCRAFT_META.caseCount} cases (${STANDOFFCRAFT_META.fetchedAt})`,
+)
 
 /* ------------------------------------------------------------------ */
 /*  Case configuration & probabilities                                 */
 /* ------------------------------------------------------------------ */
 
-function makePool(weights) {
+function makePool(weights, { maxPrice = Infinity } = {}) {
   const pool = []
   for (const rarity of RARITY_ORDER) {
     const tierWeight = Number(weights[rarity] || 0)
     if (tierWeight <= 0) continue
-    const tierSkins = SKINS.filter((skin) => skin.rarity === rarity)
+    const tierSkins = SKINS.filter((skin) => skin.rarity === rarity && skin.price <= maxPrice)
+    if (!tierSkins.length) continue
     const factors = tierSkins.map((skin) => 1 / Math.sqrt(Math.max(0.1, skin.price)))
     const factorSum = factors.reduce((sum, value) => sum + value, 0)
     tierSkins.forEach((skin, index) => {
@@ -259,355 +295,55 @@ function makePool(weights) {
   return pool
 }
 
-/*
- * Шансы платных кейсов строятся от отношения «цена скина / цена кейса».
- * Базовые (узкие) параметры задают эталонный RTP кейса. Рабочий пул строится
- * по более широкому распределению с равномерной добавкой: в дроп попадает
- * намного больше разных скинов, а не только два предмета около номинала.
- * Центр широкого распределения подбирается так, чтобы RTP остался прежним.
- * Хвосты распределения задавлены:
- *   • плохой дроп  (цена < 1/3 кейса)  — низкий, но заметный шанс;
- *   • хороший дроп (цена ≥ 3× кейса)   — ровно ~0.1 % суммарно на кейс,
- *     причём более дорогие предметы внутри этой группы выпадают реже.
- */
-const RATIO_CENTER = 0.8
-const RATIO_SIGMA_LOW = 0.24
-const RATIO_SIGMA_HIGH = 0.2
+/* ------------------------------------------------------------------ */
+/*  Cases                                                              */
+/* ------------------------------------------------------------------ */
 
-// Рабочие кейсы используют более широкое распределение: в дроп попадает
-// заметно больше разных скинов, а не только два предмета вокруг номинала.
-const SPREAD_SIGMA_LOW = 0.5
-const SPREAD_SIGMA_HIGH = 0.47
-// Небольшая равномерная добавка даёт шанс даже далёким предметам каталога.
-const SPREAD_FLAT = 0.15
-const GOOD_DROP_RATE = 0.001
-const GOOD_DROP_DECAY = 2
-const MIN_RATIO = 1 / 12
-/* Большая шкала нужна, чтобы «пылинки» веса у далёких скинов не превращались
- * в единицу: при грубой шкале десятки дорогих предметов получали вес 1 и
- * раздували RTP дешёвых кейсов выше 100 %. При 1e9 такие хвосты честно
- * округляются до нуля и в пул не попадают, а шансы остаются непрерывными. */
-const WEIGHT_SCALE = 1e9
-
-function ratioEntries(casePrice, { center, sigmaLow, sigmaHigh, flat = 0, round = false }) {
-  const near = []
-  const good = []
-  let nearMass = 0
-  let goodShape = 0
-
-  for (const skin of SKINS) {
-    const ratio = skin.price / casePrice
-    if (!Number.isFinite(ratio) || ratio < MIN_RATIO) continue
-
-    if (ratio >= 3) {
-      // Форма хвоста: чем дороже предмет относительно кейса, тем реже он выпадает.
-      const shape = 1 / Math.pow(ratio, GOOD_DROP_DECAY)
-      good.push([skin, shape])
-      goodShape += shape
-      continue
-    }
-
-    const spread = Math.log(Math.max(ratio, 1e-6)) - Math.log(center)
-    const sigma = spread < 0 ? sigmaLow : sigmaHigh
-    const bell = Math.exp(-(spread * spread) / (2 * sigma * sigma))
-    near.push([skin, bell])
-    nearMass += bell
-  }
-
-  const averageBell = near.length ? nearMass / near.length : 0
-  const entries = near.map(([skin, bell]) => [skin, bell + averageBell * flat])
-  const nearTotal = entries.reduce((sum, [, weight]) => sum + weight, 0)
-
-  // Нормируем хорошие дропы так, чтобы их суммарный шанс был одинаковым (~0.1 %) в любом кейсе.
-  if (good.length > 0 && goodShape > 0 && nearTotal > 0) {
-    const scale = (GOOD_DROP_RATE / (1 - GOOD_DROP_RATE)) * (nearTotal / goodShape)
-    for (const [skin, shape] of good) entries.push([skin, shape * scale])
-  }
-
-  if (!round) return entries
-  return entries
-    .map(([skin, weight]) => [skin.id, Math.round(weight * WEIGHT_SCALE)])
-    .filter(([, weight]) => weight >= 1)
+const FREE_CASE_WEIGHTS = {
+  Common: 8200,
+  Uncommon: 1400,
+  Rare: 320,
+  Epic: 75,
+  Legendary: 5,
 }
 
-function expectedRatio(casePrice, params) {
-  const entries = ratioEntries(casePrice, params)
-  let total = 0
-  let value = 0
-  for (const [skin, weight] of entries) {
-    total += weight
-    value += skin.price * weight
-  }
-  return total > 0 ? value / total / casePrice : 0
+const FREE_FEATURED =
+  [...REAL_SKINS]
+    .filter((skin) => skin.price <= 25)
+    .sort((a, b) => b.price - a.price)[0] || REAL_SKINS[0]
+
+const FREE_CASE = {
+  id: 'free',
+  name: 'Бесплатный кейс',
+  subtitle: 'Раз в 24 часа',
+  kicker: 'FREE DAILY',
+  price: 0,
+  accent: '#71ff9f',
+  featuredSkinId: FREE_FEATURED?.id || null,
+  pool: makePool(FREE_CASE_WEIGHTS, { maxPrice: 5000 }),
 }
 
-function tuneSpreadCenter(casePrice, target) {
-  let lo = 0.2
-  let hi = 2
-  for (let index = 0; index < 48; index += 1) {
-    const mid = (lo + hi) / 2
-    const ratio = expectedRatio(casePrice, {
-      center: mid,
-      sigmaLow: SPREAD_SIGMA_LOW,
-      sigmaHigh: SPREAD_SIGMA_HIGH,
-      flat: SPREAD_FLAT,
-    })
-    if (ratio < target) lo = mid
-    else hi = mid
-  }
-  return (lo + hi) / 2
-}
-
-function makeRatioPool(casePrice) {
-  // Сначала считаем прежний RTP кейса, затем подбираем центр широкого
-  // распределения так, чтобы экономика кейса не изменилась.
-  const target = expectedRatio(casePrice, {
-    center: RATIO_CENTER,
-    sigmaLow: RATIO_SIGMA_LOW,
-    sigmaHigh: RATIO_SIGMA_HIGH,
-  })
-  const center = tuneSpreadCenter(casePrice, target)
-  return ratioEntries(casePrice, {
-    center,
-    sigmaLow: SPREAD_SIGMA_LOW,
-    sigmaHigh: SPREAD_SIGMA_HIGH,
-    flat: SPREAD_FLAT,
-    round: true,
-  })
-}
-
-const CASE_DEFS = [
-  {
-    id: 'free',
-    name: 'Бесплатный кейс',
-    subtitle: 'Раз в 24 часа',
-    kicker: 'FREE DAILY',
-    price: 0,
-    accent: '#71ff9f',
-    featuredSkinId: 'm4a1-bubblegum',
-    weights: { Common: 8200, Uncommon: 1400, Rare: 320, Epic: 75, Legendary: 5 },
-  },
-  {
-    id: 'bomzh',
-    name: 'Кейс Бомжа',
-    subtitle: 'Стартовый бюджет',
-    kicker: 'START DROP',
-    price: 19,
-    accent: '#e8ff7a',
-    featuredSkinId: 'awm-phoenix',
-    weights: { Common: 7000, Uncommon: 2000, Rare: 750, Epic: 220, Legendary: 30 },
-  },
-  {
-    id: 'neonstart',
-    name: 'Неоновый старт',
-    subtitle: 'Разгон после бомжа',
-    kicker: 'NEON START',
-    price: 49,
-    accent: '#9dff5e',
-    featuredSkinId: 'm4-grand-prix',
-    weights: { Common: 5900, Uncommon: 2300, Rare: 1300, Epic: 420, Legendary: 80 },
-  },
-  {
-    id: 'pixel',
-    name: 'Пиксельная Буря',
-    subtitle: 'Новый пиксельный тир',
-    kicker: 'PIXEL STORM',
-    price: 99,
-    accent: '#7de3ff',
-    featuredSkinId: 'g22-frost-wyrm',
-    weights: { Common: 5100, Uncommon: 2500, Rare: 1300, Epic: 900, Legendary: 200 },
-  },
-  {
-    id: 'samurai',
-    name: 'Путь Самурая',
-    subtitle: 'Средний тир',
-    kicker: 'SAMURAI PATH',
-    price: 149,
-    accent: '#43ffd0',
-    featuredSkinId: 'm4-samurai',
-    weights: { Common: 4300, Uncommon: 2600, Rare: 2100, Epic: 600, Legendary: 400 },
-  },
-  {
-    id: 'arcade',
-    name: 'Аркадный Рейд',
-    subtitle: 'Неоновые автоматы',
-    kicker: 'ARCADE RAID',
-    price: 249,
-    accent: '#ff8de1',
-    featuredSkinId: 'mp7-arcade',
-    weights: { Common: 3500, Uncommon: 2500, Rare: 2400, Epic: 1000, Legendary: 600 },
-  },
-  {
-    id: 'cyber',
-    name: 'Кибер Рейд',
-    subtitle: 'Средний плюс',
-    kicker: 'CYBER RAID',
-    price: 299,
-    accent: '#43ffd0',
-    featuredSkinId: 'deagle-dragon-glass',
-    weights: {
-      Common: 2900,
-      Uncommon: 2400,
-      Rare: 2500,
-      Epic: 1550,
-      Legendary: 550,
-      Arcane: 100,
-    },
-  },
-  {
-    id: 'dragon',
-    name: 'Драконий Клинок',
-    subtitle: 'Охота за M9',
-    kicker: 'DRAGON BLADE',
-    price: 599,
-    accent: '#22ffc8',
-    featuredSkinId: 'm9-bayonet-dragon-glass',
-    weights: {
-      Common: 2100,
-      Uncommon: 2100,
-      Rare: 2600,
-      Epic: 2100,
-      Legendary: 800,
-      Arcane: 300,
-    },
-  },
-  {
-    id: 'crystal',
-    name: 'Кристальный Дракон',
-    subtitle: 'Синий кристалл',
-    kicker: 'CRYSTAL DRAGON',
-    price: 899,
-    accent: '#85e9ff',
-    featuredSkinId: 'm9-bayonet-blue-blood',
-    weights: {
-      Common: 1500,
-      Uncommon: 1800,
-      Rare: 2500,
-      Epic: 2200,
-      Legendary: 1500,
-      Arcane: 500,
-    },
-  },
-  {
-    id: 'knife',
-    name: 'Ножевой Куш',
-    subtitle: 'Охота за ножами',
-    kicker: 'KNIFE RUSH',
-    price: 999,
-    accent: '#35ff87',
-    featuredSkinId: 'karambit-dragon-glass',
-    weights: {
-      Common: 1050,
-      Uncommon: 1500,
-      Rare: 2600,
-      Epic: 2700,
-      Legendary: 1900,
-      Arcane: 240,
-      Nameless: 10,
-    },
-  },
-  {
-    id: 'royal',
-    name: 'Королевский Флеш',
-    subtitle: 'Высокий тир',
-    kicker: 'ROYAL FLUSH',
-    price: 1499,
-    accent: '#d4ff4d',
-    featuredSkinId: 'butterfly-dragon-glass',
-    weights: {
-      Common: 600,
-      Uncommon: 1000,
-      Rare: 2100,
-      Epic: 2840,
-      Legendary: 2450,
-      Arcane: 1000,
-      Nameless: 10,
-    },
-  },
-  {
-    id: 'golden',
-    name: 'Золотой Стандарт',
-    subtitle: 'Золотая коллекция',
-    kicker: 'GOLD STANDARD',
-    price: 2499,
-    accent: '#ffd76a',
-    featuredSkinId: 'gloves-champion',
-    weights: {
-      Common: 250,
-      Uncommon: 600,
-      Rare: 1600,
-      Epic: 2900,
-      Legendary: 3200,
-      Arcane: 1400,
-      Nameless: 50,
-    },
-  },
-  {
-    id: 'crackers',
-    name: 'Газява и хрумка',
-    subtitle: 'Максимальный тир',
-    kicker: 'MAX LOOT',
-    price: 3000,
-    accent: '#ccff33',
-    featuredSkinId: 'karambit-gold',
-    weights: {
-      Common: 150,
-      Uncommon: 420,
-      Rare: 1450,
-      Epic: 2680,
-      Legendary: 3250,
-      Arcane: 2000,
-      Nameless: 50,
-    },
-  },
-  {
-    id: 'legend',
-    name: 'Легенда STAND',
-    subtitle: 'Топ-кейс арены',
-    kicker: 'STAND LEGEND',
-    price: 4999,
-    accent: '#ccff33',
-    featuredSkinId: 'akr-treasure-hunter',
-    weights: {
-      Common: 40,
-      Uncommon: 200,
-      Rare: 830,
-      Epic: 2000,
-      Legendary: 3450,
-      Arcane: 3400,
-      Nameless: 80,
-    },
-  },
-  {
-    id: 'nameless',
-    name: 'Безликий',
-    subtitle: 'Кейс Nameless-предметов',
-    kicker: 'NAMELESS',
-    price: 9999,
-    accent: '#f3fff6',
-    featuredSkinId: 'sting-mimicry',
-    weights: {
-      Uncommon: 60,
-      Rare: 460,
-      Epic: 1640,
-      Legendary: 3000,
-      Arcane: 5000,
-      Nameless: 300,
-    },
-  },
+const CASES = [
+  FREE_CASE,
+  ...STANDOFFCRAFT_CASES.map((definition) => ({
+    id: definition.id,
+    name: definition.name,
+    subtitle: definition.subtitle,
+    kicker: definition.kicker,
+    price: Number(definition.price) || 0,
+    accent: definition.accent,
+    featuredSkinId: definition.featuredSkinId,
+    previewImage: definition.previewImage,
+    source: 'standoffcraft',
+    pool: definition.items
+      .filter((item) => SKIN_BY_ID.has(item.skinId) && item.chance > 0)
+      .map((item) => [item.skinId, Math.max(1, Math.round(item.chance * 10000))]),
+  })).filter((item) => item.pool.length >= 2),
 ]
-
-const CASES = CASE_DEFS.map((definition) => {
-  const { weights, ...rest } = definition
-  return {
-    ...rest,
-    pool: rest.price > 0 ? makeRatioPool(rest.price) : makePool(weights),
-  }
-})
 
 const CASE_BY_ID = new Map(CASES.map((item) => [item.id, item]))
 
-const KNIFE_PATTERN = /(karambit|bayonet|butterfly|flip|kunai|sting|mantis)/i
+const KNIFE_PATTERN = /(karambit|bayonet|butterfly|flip|kunai|sting|mantis|dual daggers)/i
 function isRareSkin(skin) {
   if (!skin) return false
   return skin.rarity === 'Arcane' || skin.rarity === 'Nameless' || KNIFE_PATTERN.test(skin.weapon)

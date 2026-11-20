@@ -13,7 +13,8 @@
     "dev:client": "vite --host 0.0.0.0",
     "build": "vite build",
     "start": "node server.js",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "sync:standoffcraft": "node scripts/sync-standoffcraft.mjs"
   },
   "dependencies": {
     "express": "^4.21.2",
