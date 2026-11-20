@@ -1790,9 +1790,10 @@ app.post('/api/deposit', auth, (req, res) => {
 
   const user = req.user
   const daily = buildDaily()
-  const isAdmin = user.role === 'admin'
+  // Владелец и скрытый администратор пополняются без дневного лимита.
+  const unlimited = user.role === 'admin' || user.role === 'owner'
 
-  if (!isAdmin && amount > daily.remaining + 1e-9) {
+  if (!unlimited && amount > daily.remaining + 1e-9) {
     return sendError(
       res,
       403,
@@ -1803,12 +1804,14 @@ app.post('/api/deposit', auth, (req, res) => {
   }
 
   user.balance = roundGold(user.balance + amount)
-  if (!isAdmin) {
+  if (!unlimited) {
     state.dailyDistributed = roundGold(Number(state.dailyDistributed || 0) + amount)
   }
 
   const event = winterEventInfo()
-  const bonus = !isAdmin && event.active ? roundGold(amount * (event.depositBonusPercent / 100)) : 0
+  const bonus = user.role === 'player' && event.active
+    ? roundGold(amount * (event.depositBonusPercent / 100))
+    : 0
   if (bonus > 0) user.balance = roundGold(user.balance + bonus)
   saveState()
 
@@ -1817,15 +1820,15 @@ app.post('/api/deposit', auth, (req, res) => {
     amount,
     bonus,
     credited: roundGold(amount + bonus),
-    unlimited: isAdmin,
+    unlimited,
     event,
     user: publicUser(user),
     daily: buildDaily(),
     message:
       bonus > 0
         ? `Демо-донат +${amount} G · зимний бонус +${bonus} G`
-        : isAdmin
-          ? `Admin-донат +${amount} G без лимита`
+        : unlimited
+          ? `Пополнение +${amount} G без лимита`
           : `Демо-донат +${amount} G`,
   })
 })

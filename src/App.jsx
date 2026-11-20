@@ -346,6 +346,12 @@ const ICONS = {
       <path d="m9.2 4.6 2.8 2.4 2.8-2.4M9.2 19.4l2.8-2.4 2.8 2.4" />
     </>
   ),
+  settings: (
+    <>
+      <circle cx="12" cy="12" r="3.2" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9v.09A1.7 1.7 0 0 0 20.96 10H21a2 2 0 1 1 0 4h-.09A1.7 1.7 0 0 0 19.4 15Z" />
+    </>
+  ),
 }
 
 function Icon({ name, size = 18, className = '', strokeWidth = 2 }) {
@@ -994,6 +1000,7 @@ function Header({
   onStore,
   onDonate,
   onHistory,
+  onSettings,
   onToggleSound,
   onLogout,
 }) {
@@ -1058,6 +1065,14 @@ function Header({
           >
             <Icon name="bag" size={14} className="text-white/28 group-hover:text-acid/70" />
             Магазин
+          </button>
+          <button
+            type="button"
+            onClick={onSettings}
+            className="group flex items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-bold text-white/48 transition hover:bg-white/[0.04] hover:text-white"
+          >
+            <Icon name="settings" size={14} className="text-white/28 group-hover:text-acid/70" />
+            Настройки
           </button>
         </nav>
 
@@ -1162,6 +1177,17 @@ function Header({
                 >
                   <Icon name="bag" size={14} />
                   Магазин скинов
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    onSettings()
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] font-bold text-white/60 transition hover:bg-white/[0.05] hover:text-white"
+                >
+                  <Icon name="settings" size={14} />
+                  Настройки
                 </button>
                 <button
                   type="button"
@@ -5253,16 +5279,15 @@ function DonateModal({ balance, token, user, daily, event, onClose, onUpdate, on
   const [phase, setPhase] = useState('idle')
   const [error, setError] = useState('')
   const loading = phase !== 'idle'
-  const isAdmin = user?.role === 'admin'
-  const remaining = isAdmin ? Infinity : Math.max(0, Number(daily?.remaining) || 0)
+  const unlimited = user?.role === 'admin' || user?.role === 'owner'
+  const remaining = unlimited ? Infinity : Math.max(0, Number(daily?.remaining) || 0)
   const limit = Number(daily?.limit) || 15000
-  const available = isAdmin ? limit : remaining
   const amount = Math.max(0, Math.floor(Number(amountInput) || 0))
   const bonus =
-    event?.active && !isAdmin
+    user?.role === 'player' && event?.active
       ? Math.round(amount * ((Number(event.depositBonusPercent) || 0) / 100) * 100) / 100
       : 0
-  const exceeds = !isAdmin && amount > remaining + 1e-9
+  const exceeds = !unlimited && amount > remaining + 1e-9
   const close = useCallback(() => onClose(), [onClose])
   useEscape(close)
 
@@ -5342,20 +5367,20 @@ function DonateModal({ balance, token, user, daily, event, onClose, onUpdate, on
                 Дневной лимит пополнения
               </span>
               <span className="text-[9px] font-extrabold tabular-nums text-[#ffda8a]">
-                {isAdmin ? 'Без лимита' : `${formatGold(remaining)} / ${formatGold(limit)}`}
+                {unlimited ? 'Без лимита' : `${formatGold(remaining)} / ${formatGold(limit)}`}
               </span>
             </div>
             <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-white/[0.08]">
               <div
                 className="h-full rounded-full bg-gradient-to-r from-[#ffc857] to-[#ffe9a8] transition-all duration-500"
                 style={{
-                  width: isAdmin ? '100%' : `${Math.min(100, (remaining / limit) * 100).toFixed(1)}%`,
+                  width: unlimited ? '100%' : `${Math.min(100, (remaining / limit) * 100).toFixed(1)}%`,
                 }}
               />
             </div>
             <div className="mt-1.5 text-[7.5px] font-semibold leading-relaxed text-white/25">
-              {isAdmin
-                ? 'Admin-аккаунт пополняется без дневных ограничений.'
+              {unlimited
+                ? 'Аккаунт пополняется без дневных ограничений.'
                 : `Сегодня можно пополнить ещё ${formatGold(remaining)}. Лимит сбрасывается в 00:00.`}
             </div>
           </div>
@@ -5420,7 +5445,7 @@ function DonateModal({ balance, token, user, daily, event, onClose, onUpdate, on
             )}
           </label>
 
-          {event?.active && amount > 0 && (
+          {bonus > 0 && amount > 0 && (
             <div className="mt-2.5 flex items-center justify-between gap-2 rounded-xl border border-[#9fdcff]/20 bg-[#9fdcff]/[0.06] px-3 py-2">
               <span className="flex items-center gap-1.5 text-[8px] font-bold text-[#d8f4ff]">
                 <Icon name="snowflake" size={12} className="text-[#bfe9ff]" />
@@ -5469,8 +5494,160 @@ function DonateModal({ balance, token, user, daily, event, onClose, onUpdate, on
           <div className="mt-3 flex items-start gap-2 rounded-xl border border-[#ffc857]/15 bg-[#ffc857]/[0.04] p-3 text-[8px] leading-relaxed text-[#ffda8a]/65">
             <Icon name="info" size={12} className="mt-0.5 shrink-0" />
             Демо-режим: реальные платежи не проводятся. После нажатия «Пополнить» мы имитируем проверку платежа
-            (1.5–2 сек) и зачисляем голду, если дневной лимит не превышен.
+            (1.5–2 сек) и зачисляем голду{unlimited ? ' без дневного лимита.' : ', если дневной лимит не превышен.'}
           </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  Settings modal                                                     */
+/* ------------------------------------------------------------------ */
+
+function SettingToggle({ icon, title, description, active, onToggle }) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-white/[0.07] bg-white/[0.025] px-3 py-2.5">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/[0.07] bg-black/20 text-white/40">
+        <Icon name={icon} size={14} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="text-[10px] font-extrabold text-white/75">{title}</div>
+        <div className="mt-0.5 text-[8px] font-semibold text-white/28">{description}</div>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={active}
+        aria-label={title}
+        onClick={onToggle}
+        className={cx(
+          'relative h-6 w-11 shrink-0 rounded-full border transition',
+          active ? 'border-acid/40 bg-acid/25' : 'border-white/[0.12] bg-white/[0.05]',
+        )}
+      >
+        <span
+          className={cx(
+            'absolute top-0.5 rounded-full transition-all duration-200',
+            active ? 'left-[22px] bg-acid' : 'left-0.5 bg-white/45',
+          )}
+          style={{ height: 18, width: 18 }}
+        />
+      </button>
+    </div>
+  )
+}
+
+function SettingsModal({ user, soundOn, fast, onToggleSound, onToggleFast, onLogout, onClose }) {
+  const close = useCallback(() => onClose(), [onClose])
+  useEscape(close)
+  const roleLabel =
+    user.role === 'owner'
+      ? 'Владелец проекта'
+      : user.role === 'admin'
+        ? 'Скрытый администратор'
+        : 'Player account'
+  const roleTag = user.role === 'owner' ? 'OWNER' : user.role === 'admin' ? 'ADMIN' : 'PLAYER'
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[#030604]/85 p-4 backdrop-blur-md"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Настройки"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
+      <div className="pop-in relative w-full max-w-[430px] overflow-hidden rounded-[26px] border border-white/[0.09] bg-[#0d1510] shadow-panel">
+        <div className="pointer-events-none absolute -left-16 -top-20 h-52 w-52 rounded-full bg-acid/10 blur-3xl" />
+        <div className="relative p-5 sm:p-6">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-acid/20 bg-acid/[0.08] text-acid">
+                <Icon name="settings" size={20} />
+              </div>
+              <div>
+                <div className="text-[8px] font-black uppercase tracking-[0.16em] text-acid/60">Settings</div>
+                <h2 className="mt-0.5 font-display text-[18px] font-black tracking-[-0.04em] text-white">
+                  Настройки
+                </h2>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-white/30 transition hover:bg-white/[0.05] hover:text-white"
+              aria-label="Закрыть"
+            >
+              <Icon name="x" size={16} />
+            </button>
+          </div>
+
+          <div className="mt-4 rounded-xl border border-white/[0.07] bg-white/[0.025] p-3">
+            <div className="flex items-center gap-3">
+              <span className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-acid/20 bg-acid/[0.07] text-sm font-extrabold uppercase text-acid">
+                <span className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(53,255,135,.2),transparent_70%)]" />
+                <span className="relative">{user.username.slice(0, 1)}</span>
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13px] font-extrabold text-white">{user.username}</div>
+                <div className="mt-0.5 text-[8px] font-bold uppercase tracking-[0.14em] text-white/30">
+                  {roleLabel}
+                </div>
+              </div>
+              <span className="rounded-md border border-lime/25 bg-lime/10 px-1.5 py-1 text-[8px] font-black tracking-[0.12em] text-lime">
+                {roleTag}
+              </span>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="rounded-lg border border-white/[0.06] bg-black/15 p-2">
+                <div className="text-[8px] uppercase tracking-[0.14em] text-white/28">Баланс</div>
+                <div className="mt-1 text-[11px] font-extrabold tabular-nums text-acid">
+                  {formatGold(user.balance)}
+                </div>
+              </div>
+              <div className="rounded-lg border border-white/[0.06] bg-black/15 p-2">
+                <div className="text-[8px] uppercase tracking-[0.14em] text-white/28">Скины</div>
+                <div className="mt-1 text-[11px] font-extrabold tabular-nums text-white/75">
+                  {user.inventory.length}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-2">
+            <div className="text-[8px] font-black uppercase tracking-[0.14em] text-white/30">Настройки аккаунта</div>
+            <SettingToggle
+              icon={soundOn ? 'volume' : 'volumeOff'}
+              title="Звук интерфейса"
+              description={soundOn ? 'Звуки кейсов и апгрейдов включены' : 'Все звуки выключены'}
+              active={soundOn}
+              onToggle={onToggleSound}
+            />
+            <SettingToggle
+              icon="bolt"
+              title="Быстрые анимации"
+              description={fast ? 'Короткие анимации (~0.5 сек)' : 'Полные анимации (3.5 сек)'}
+              active={fast}
+              onToggle={onToggleFast}
+            />
+          </div>
+
+          <div className="mt-4 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-[8px] leading-relaxed text-white/27">
+            Выход завершит текущую сессию на этом устройстве. Баланс и инвентарь сохранятся на сервере — можно
+            войти снова в любой момент.
+          </div>
+
+          <button
+            type="button"
+            onClick={onLogout}
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-[#ff5d7a]/25 bg-[#ff5d7a]/[0.07] px-4 py-3 text-[10px] font-black uppercase tracking-[0.1em] text-[#ff9aac] transition hover:border-[#ff5d7a]/40 hover:bg-[#ff5d7a]/[0.12]"
+          >
+            <Icon name="logout" size={15} />
+            Выйти из аккаунта
+          </button>
         </div>
       </div>
     </div>
@@ -5995,6 +6172,7 @@ export default function App() {
   const [activeCase, setActiveCase] = useState(null)
   const [storeOpen, setStoreOpen] = useState(false)
   const [donateOpen, setDonateOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [withdrawSkin, setWithdrawSkin] = useState(null)
   const [online, setOnline] = useState(1)
@@ -6115,7 +6293,7 @@ export default function App() {
     lastUnseenRef.current = unseenPromos
   }, [unseenPromos, status, pushToast])
 
-  useBodyLock(Boolean(activeCase || storeOpen || donateOpen || historyOpen || withdrawSkin))
+  useBodyLock(Boolean(activeCase || storeOpen || donateOpen || settingsOpen || historyOpen || withdrawSkin))
 
   const applyUpdate = useCallback((data) => {
     if (!data) return
@@ -6146,6 +6324,7 @@ export default function App() {
     setActiveCase(null)
     setStoreOpen(false)
     setDonateOpen(false)
+    setSettingsOpen(false)
     setHistoryOpen(false)
     setWithdrawSkin(null)
     setStatus({
@@ -6175,6 +6354,7 @@ export default function App() {
       setActiveCase(null)
       setStoreOpen(false)
       setDonateOpen(false)
+      setSettingsOpen(false)
       setHistoryOpen(false)
       setWithdrawSkin(null)
       setOnline(1)
@@ -6283,6 +6463,7 @@ export default function App() {
         onStore={goStore}
         onDonate={() => setDonateOpen(true)}
         onHistory={goHistory}
+        onSettings={() => setSettingsOpen(true)}
         onToggleSound={toggleSound}
         onLogout={handleLogout}
       />
@@ -6371,6 +6552,18 @@ export default function App() {
           onClose={() => setDonateOpen(false)}
           onUpdate={applyUpdate}
           onToast={pushToast}
+        />
+      )}
+
+      {settingsOpen && (
+        <SettingsModal
+          user={user}
+          soundOn={soundOn}
+          fast={fast}
+          onToggleSound={toggleSound}
+          onToggleFast={toggleFast}
+          onLogout={handleLogout}
+          onClose={() => setSettingsOpen(false)}
         />
       )}
 
