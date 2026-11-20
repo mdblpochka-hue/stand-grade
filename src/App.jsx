@@ -991,11 +991,20 @@ const NAV_ITEMS = [
   { id: 'inventory', label: 'Инвентарь', icon: 'archive' },
 ]
 
+const SECTION_IDS = ['cases', 'craft', 'battle', 'upgrade', 'promos', 'inventory', 'settings']
+
+function readSectionFromHash() {
+  if (typeof window === 'undefined') return 'cases'
+  const hash = window.location.hash.replace('#', '')
+  return SECTION_IDS.includes(hash) ? hash : 'cases'
+}
+
 function Header({
   user,
   online,
   soundOn,
   promoBadge = 0,
+  activeSection = 'cases',
   onNavigate,
   onStore,
   onDonate,
@@ -1039,10 +1048,23 @@ function Header({
               key={item.id}
               type="button"
               onClick={() => onNavigate(item.id)}
-              className="group flex items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-bold text-white/48 transition hover:bg-white/[0.04] hover:text-white"
+              title={item.label}
+              aria-label={item.label}
+              className={cx(
+                'group flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] font-bold transition',
+                activeSection === item.id
+                  ? 'bg-acid/[0.09] text-white'
+                  : 'text-white/48 hover:bg-white/[0.04] hover:text-white',
+              )}
             >
-              <Icon name={item.icon} size={14} className="text-white/28 group-hover:text-acid/70" />
-              {item.label}
+              <Icon
+                name={item.icon}
+                size={13}
+                className={
+                  activeSection === item.id ? 'text-acid' : 'text-white/28 group-hover:text-acid/70'
+                }
+              />
+              <span className="hidden xl:inline">{item.label}</span>
               {item.id === 'promos' && promoBadge > 0 && (
                 <span className="promo-badge flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ffcf4d] px-1 text-[9px] font-black text-[#241a00]">
                   !
@@ -1053,7 +1075,7 @@ function Header({
           <button
             type="button"
             onClick={onHistory}
-            className="group flex items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-bold text-white/48 transition hover:bg-white/[0.04] hover:text-white"
+            className="group hidden items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-bold text-white/48 transition hover:bg-white/[0.04] hover:text-white 2xl:flex"
           >
             <Icon name="history" size={14} className="text-white/28 group-hover:text-acid/70" />
             История
@@ -1061,7 +1083,7 @@ function Header({
           <button
             type="button"
             onClick={onStore}
-            className="group flex items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-bold text-white/48 transition hover:bg-white/[0.04] hover:text-white"
+            className="group hidden items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-bold text-white/48 transition hover:bg-white/[0.04] hover:text-white 2xl:flex"
           >
             <Icon name="bag" size={14} className="text-white/28 group-hover:text-acid/70" />
             Магазин
@@ -1069,19 +1091,39 @@ function Header({
           <button
             type="button"
             onClick={onSettings}
-            className="group flex items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-bold text-white/48 transition hover:bg-white/[0.04] hover:text-white"
+            title="Настройки"
+            aria-label="Настройки"
+            className={cx(
+              'group flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] font-bold transition',
+              activeSection === 'settings'
+                ? 'bg-acid/[0.09] text-white'
+                : 'text-white/48 hover:bg-white/[0.04] hover:text-white',
+            )}
           >
-            <Icon name="settings" size={14} className="text-white/28 group-hover:text-acid/70" />
-            Настройки
+            <Icon
+              name="settings"
+              size={13}
+              className={activeSection === 'settings' ? 'text-acid' : 'text-white/28 group-hover:text-acid/70'}
+            />
+            <span className="hidden xl:inline">Настройки</span>
           </button>
         </nav>
 
         <div className="flex items-center gap-1.5 sm:gap-2">
-          <div className="hidden items-center gap-1.5 rounded-xl border border-white/[0.07] bg-white/[0.03] px-2.5 py-2 xl:flex">
+          <div className="hidden items-center gap-1.5 rounded-xl border border-white/[0.07] bg-white/[0.03] px-2.5 py-2 2xl:flex">
             <span className="live-dot h-1.5 w-1.5 rounded-full bg-acid" />
             <span className="text-[8px] font-bold uppercase tracking-[0.12em] text-white/32">Онлайн</span>
             <span className="text-[10px] font-extrabold tabular-nums text-white/70">{online}</span>
           </div>
+          <button
+            type="button"
+            onClick={onSettings}
+            className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.09] bg-white/[0.035] text-white/45 transition hover:border-acid/30 hover:text-acid lg:hidden"
+            aria-label="Настройки"
+            title="Настройки"
+          >
+            <Icon name="settings" size={16} />
+          </button>
           <button
             type="button"
             onClick={onToggleSound}
@@ -1209,7 +1251,14 @@ function Header({
   )
 }
 
-function MobileDock({ onNavigate, onStore, onHistory, inventoryCount, promoBadge = 0 }) {
+function MobileDock({
+  onNavigate,
+  onStore,
+  onHistory,
+  inventoryCount,
+  promoBadge = 0,
+  activeSection = 'cases',
+}) {
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-white/[0.07] bg-[#080d09]/95 backdrop-blur-xl lg:hidden">
       <div className="safe-bottom grid grid-cols-7 px-1 pb-1 pt-1.5">
@@ -1230,7 +1279,10 @@ function MobileDock({ onNavigate, onStore, onHistory, inventoryCount, promoBadge
               else if (item.id === 'history') onHistory()
               else onNavigate(item.id)
             }}
-            className="relative flex flex-col items-center gap-1 rounded-xl py-2 text-[7.5px] font-extrabold uppercase tracking-[0.06em] text-white/36 transition active:bg-white/[0.04]"
+            className={cx(
+              'relative flex flex-col items-center gap-1 rounded-xl py-2 text-[7.5px] font-extrabold uppercase tracking-[0.06em] transition active:bg-white/[0.04]',
+              activeSection === item.id ? 'bg-acid/[0.08] text-acid' : 'text-white/36',
+            )}
           >
             <span className="relative">
               <Icon name={item.icon} size={17} />
@@ -3912,7 +3964,7 @@ function StorePromo({ catalog, onStore }) {
   )
 }
 
-function Footer({ onHistory }) {
+function Footer({ onHistory, onNavigate, onStore }) {
   return (
     <footer className="mt-16 border-t border-white/[0.06] pb-28 pt-8 lg:pb-10">
       <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
@@ -3930,12 +3982,13 @@ function Footer({ onHistory }) {
             ['Битва', 'battle'],
             ['Апгрейд', 'upgrade'],
             ['Инвентарь', 'inventory'],
+            ['Настройки', 'settings'],
             ['Магазин', 'store-promo'],
           ].map(([label, target]) => (
             <button
               key={target}
               type="button"
-              onClick={() => document.getElementById(target)?.scrollIntoView({ behavior: 'smooth' })}
+              onClick={() => (target === 'store-promo' ? onStore() : onNavigate(target))}
               className="text-left transition hover:text-acid"
             >
               {label}
@@ -5539,9 +5592,7 @@ function SettingToggle({ icon, title, description, active, onToggle }) {
   )
 }
 
-function SettingsModal({ user, soundOn, fast, onToggleSound, onToggleFast, onLogout, onClose }) {
-  const close = useCallback(() => onClose(), [onClose])
-  useEscape(close)
+function SettingsSection({ user, soundOn, fast, onToggleSound, onToggleFast, onLogout, onStore }) {
   const roleLabel =
     user.role === 'owner'
       ? 'Владелец проекта'
@@ -5551,74 +5602,68 @@ function SettingsModal({ user, soundOn, fast, onToggleSound, onToggleFast, onLog
   const roleTag = user.role === 'owner' ? 'OWNER' : user.role === 'admin' ? 'ADMIN' : 'PLAYER'
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[#030604]/85 p-4 backdrop-blur-md"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Настройки"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose()
-      }}
-    >
-      <div className="pop-in relative w-full max-w-[430px] overflow-hidden rounded-[26px] border border-white/[0.09] bg-[#0d1510] shadow-panel">
-        <div className="pointer-events-none absolute -left-16 -top-20 h-52 w-52 rounded-full bg-acid/10 blur-3xl" />
-        <div className="relative p-5 sm:p-6">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-acid/20 bg-acid/[0.08] text-acid">
-                <Icon name="settings" size={20} />
-              </div>
-              <div>
-                <div className="text-[8px] font-black uppercase tracking-[0.16em] text-acid/60">Settings</div>
-                <h2 className="mt-0.5 font-display text-[18px] font-black tracking-[-0.04em] text-white">
-                  Настройки
-                </h2>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-white/30 transition hover:bg-white/[0.05] hover:text-white"
-              aria-label="Закрыть"
-            >
-              <Icon name="x" size={16} />
-            </button>
+    <section id="settings" className="pt-10 sm:pt-14">
+      <SectionHeading
+        eyebrow="ACCOUNT SETTINGS"
+        title="Настройки"
+        description="Профиль, звук, скорость анимаций и выход из аккаунта — всё в одном разделе."
+      />
+
+      <div className="grid gap-3 lg:grid-cols-[1.05fr_.95fr]">
+        <div className="relative overflow-hidden rounded-[22px] border border-white/[0.08] bg-[linear-gradient(155deg,#0e1714,#090d0b)] p-4 sm:p-5">
+          <div className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full bg-acid/10 blur-3xl" />
+          <div className="relative flex items-center justify-between gap-2">
+            <div className="text-[9px] font-black uppercase tracking-[0.14em] text-white/40">Аккаунт</div>
+            <span className="rounded-md border border-lime/25 bg-lime/10 px-1.5 py-1 text-[8px] font-black tracking-[0.12em] text-lime">
+              {roleTag}
+            </span>
           </div>
 
-          <div className="mt-4 rounded-xl border border-white/[0.07] bg-white/[0.025] p-3">
-            <div className="flex items-center gap-3">
-              <span className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-acid/20 bg-acid/[0.07] text-sm font-extrabold uppercase text-acid">
-                <span className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(53,255,135,.2),transparent_70%)]" />
-                <span className="relative">{user.username.slice(0, 1)}</span>
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[13px] font-extrabold text-white">{user.username}</div>
-                <div className="mt-0.5 text-[8px] font-bold uppercase tracking-[0.14em] text-white/30">
-                  {roleLabel}
-                </div>
-              </div>
-              <span className="rounded-md border border-lime/25 bg-lime/10 px-1.5 py-1 text-[8px] font-black tracking-[0.12em] text-lime">
-                {roleTag}
-              </span>
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <div className="rounded-lg border border-white/[0.06] bg-black/15 p-2">
-                <div className="text-[8px] uppercase tracking-[0.14em] text-white/28">Баланс</div>
-                <div className="mt-1 text-[11px] font-extrabold tabular-nums text-acid">
-                  {formatGold(user.balance)}
-                </div>
-              </div>
-              <div className="rounded-lg border border-white/[0.06] bg-black/15 p-2">
-                <div className="text-[8px] uppercase tracking-[0.14em] text-white/28">Скины</div>
-                <div className="mt-1 text-[11px] font-extrabold tabular-nums text-white/75">
-                  {user.inventory.length}
-                </div>
+          <div className="relative mt-3 flex items-center gap-3 rounded-xl border border-white/[0.07] bg-white/[0.025] p-3">
+            <span className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-acid/20 bg-acid/[0.07] text-sm font-extrabold uppercase text-acid">
+              <span className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(53,255,135,.2),transparent_70%)]" />
+              <span className="relative">{user.username.slice(0, 1)}</span>
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[13px] font-extrabold text-white">{user.username}</div>
+              <div className="mt-0.5 text-[8px] font-bold uppercase tracking-[0.14em] text-white/30">
+                {roleLabel}
               </div>
             </div>
           </div>
 
-          <div className="mt-4 space-y-2">
-            <div className="text-[8px] font-black uppercase tracking-[0.14em] text-white/30">Настройки аккаунта</div>
+          <div className="relative mt-3 grid grid-cols-2 gap-2">
+            <div className="rounded-xl border border-white/[0.06] bg-black/15 p-3">
+              <div className="text-[8px] uppercase tracking-[0.14em] text-white/28">Баланс</div>
+              <div className="mt-1 text-[12px] font-extrabold tabular-nums text-acid">
+                {formatGold(user.balance)}
+              </div>
+            </div>
+            <div className="rounded-xl border border-white/[0.06] bg-black/15 p-3">
+              <div className="text-[8px] uppercase tracking-[0.14em] text-white/28">Скины</div>
+              <div className="mt-1 text-[12px] font-extrabold tabular-nums text-white/75">
+                {user.inventory.length}
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onStore}
+            className="relative mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-acid/25 bg-acid/[0.07] px-4 py-2.5 text-[9px] font-black uppercase tracking-[0.08em] text-acid transition hover:bg-acid/[0.12]"
+          >
+            <Icon name="bag" size={14} />
+            Магазин скинов
+          </button>
+        </div>
+
+        <div className="relative overflow-hidden rounded-[22px] border border-white/[0.08] bg-[linear-gradient(155deg,#14110b,#0a0d09)] p-4 sm:p-5">
+          <div className="pointer-events-none absolute -left-16 -top-16 h-44 w-44 rounded-full bg-[#ffcf4d]/10 blur-3xl" />
+          <div className="relative text-[9px] font-black uppercase tracking-[0.14em] text-white/40">
+            Настройки аккаунта
+          </div>
+
+          <div className="relative mt-3 space-y-2">
             <SettingToggle
               icon={soundOn ? 'volume' : 'volumeOff'}
               title="Звук интерфейса"
@@ -5635,7 +5680,7 @@ function SettingsModal({ user, soundOn, fast, onToggleSound, onToggleFast, onLog
             />
           </div>
 
-          <div className="mt-4 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-[8px] leading-relaxed text-white/27">
+          <div className="relative mt-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-[8px] leading-relaxed text-white/27">
             Выход завершит текущую сессию на этом устройстве. Баланс и инвентарь сохранятся на сервере — можно
             войти снова в любой момент.
           </div>
@@ -5643,14 +5688,14 @@ function SettingsModal({ user, soundOn, fast, onToggleSound, onToggleFast, onLog
           <button
             type="button"
             onClick={onLogout}
-            className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-[#ff5d7a]/25 bg-[#ff5d7a]/[0.07] px-4 py-3 text-[10px] font-black uppercase tracking-[0.1em] text-[#ff9aac] transition hover:border-[#ff5d7a]/40 hover:bg-[#ff5d7a]/[0.12]"
+            className="relative mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-[#ff5d7a]/25 bg-[#ff5d7a]/[0.07] px-4 py-3 text-[10px] font-black uppercase tracking-[0.1em] text-[#ff9aac] transition hover:border-[#ff5d7a]/40 hover:bg-[#ff5d7a]/[0.12]"
           >
             <Icon name="logout" size={15} />
             Выйти из аккаунта
           </button>
         </div>
       </div>
-    </div>
+    </section>
   )
 }
 
@@ -6172,7 +6217,7 @@ export default function App() {
   const [activeCase, setActiveCase] = useState(null)
   const [storeOpen, setStoreOpen] = useState(false)
   const [donateOpen, setDonateOpen] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [activeSection, setActiveSection] = useState(readSectionFromHash)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [withdrawSkin, setWithdrawSkin] = useState(null)
   const [online, setOnline] = useState(1)
@@ -6293,7 +6338,17 @@ export default function App() {
     lastUnseenRef.current = unseenPromos
   }, [unseenPromos, status, pushToast])
 
-  useBodyLock(Boolean(activeCase || storeOpen || donateOpen || settingsOpen || historyOpen || withdrawSkin))
+  useBodyLock(Boolean(activeCase || storeOpen || donateOpen || historyOpen || withdrawSkin))
+
+  useEffect(() => {
+    const syncSection = () => setActiveSection(readSectionFromHash())
+    window.addEventListener('popstate', syncSection)
+    return () => window.removeEventListener('popstate', syncSection)
+  }, [])
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'auto' })
+  }, [activeSection])
 
   const applyUpdate = useCallback((data) => {
     if (!data) return
@@ -6324,7 +6379,6 @@ export default function App() {
     setActiveCase(null)
     setStoreOpen(false)
     setDonateOpen(false)
-    setSettingsOpen(false)
     setHistoryOpen(false)
     setWithdrawSkin(null)
     setStatus({
@@ -6354,7 +6408,6 @@ export default function App() {
       setActiveCase(null)
       setStoreOpen(false)
       setDonateOpen(false)
-      setSettingsOpen(false)
       setHistoryOpen(false)
       setWithdrawSkin(null)
       setOnline(1)
@@ -6400,6 +6453,7 @@ export default function App() {
   }
 
   function navigate(target) {
+    if (!SECTION_IDS.includes(target)) return
     if (target === 'promos' && token && unseenPromos > 0) {
       apiRequest('/api/promos/seen', { method: 'POST', token })
         .then((data) => {
@@ -6408,7 +6462,11 @@ export default function App() {
         })
         .catch(() => {})
     }
-    document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    setActiveSection(target)
+    if (window.location.hash !== `#${target}`) {
+      window.history.pushState(null, '', `#${target}`)
+    }
+    window.scrollTo({ top: 0, behavior: 'auto' })
   }
 
   function openCase(caseData) {
@@ -6459,51 +6517,85 @@ export default function App() {
         online={online}
         soundOn={soundOn}
         promoBadge={unseenPromos}
+        activeSection={activeSection}
         onNavigate={navigate}
         onStore={goStore}
         onDonate={() => setDonateOpen(true)}
         onHistory={goHistory}
-        onSettings={() => setSettingsOpen(true)}
+        onSettings={() => navigate('settings')}
         onToggleSound={toggleSound}
         onLogout={handleLogout}
       />
       {status.event?.active && <WinterEventBar event={status.event} onNavigate={navigate} />}
 
       <main className="relative mx-auto max-w-[1540px] px-3 pb-28 sm:px-6 lg:pb-10 xl:px-8">
-        <UpgradeSection
-          user={user}
-          catalog={catalog}
-          token={token}
-          fast={fast}
-          onToggleFast={toggleFast}
-          onUpdate={applyUpdate}
-          onToast={pushToast}
-        />
+        <div key={activeSection} className="fade-up">
+          {activeSection === 'upgrade' && (
+            <UpgradeSection
+              user={user}
+              catalog={catalog}
+              token={token}
+              fast={fast}
+              onToggleFast={toggleFast}
+              onUpdate={applyUpdate}
+              onToast={pushToast}
+            />
+          )}
 
-        <CasesSection cases={cases} onOpen={openCase} user={user} now={now} />
+          {activeSection === 'cases' && (
+            <>
+              <CasesSection cases={cases} onOpen={openCase} user={user} now={now} />
+              <StorePromo catalog={catalog} onStore={goStore} />
+            </>
+          )}
 
-        <CraftSection user={user} token={token} onUpdate={applyUpdate} onToast={pushToast} />
+          {activeSection === 'craft' && (
+            <CraftSection user={user} token={token} onUpdate={applyUpdate} onToast={pushToast} />
+          )}
 
-        <BattleSection cases={cases} user={user} token={token} onUpdate={applyUpdate} onToast={pushToast} />
+          {activeSection === 'battle' && (
+            <BattleSection
+              cases={cases}
+              user={user}
+              token={token}
+              onUpdate={applyUpdate}
+              onToast={pushToast}
+            />
+          )}
 
-        <PromoSection
-          promos={status.promos}
-          user={user}
-          token={token}
-          event={status.event}
-          onUpdate={applyUpdate}
-          onToast={pushToast}
-        />
+          {activeSection === 'promos' && (
+            <PromoSection
+              promos={status.promos}
+              user={user}
+              token={token}
+              event={status.event}
+              onUpdate={applyUpdate}
+              onToast={pushToast}
+            />
+          )}
 
-        <InventorySection
-          user={user}
-          onSell={sellItem}
-          onWithdraw={(item) => setWithdrawSkin(item)}
-        />
+          {activeSection === 'inventory' && (
+            <InventorySection
+              user={user}
+              onSell={sellItem}
+              onWithdraw={(item) => setWithdrawSkin(item)}
+            />
+          )}
 
-        <StorePromo catalog={catalog} onStore={goStore} />
+          {activeSection === 'settings' && (
+            <SettingsSection
+              user={user}
+              soundOn={soundOn}
+              fast={fast}
+              onToggleSound={toggleSound}
+              onToggleFast={toggleFast}
+              onLogout={handleLogout}
+              onStore={goStore}
+            />
+          )}
+        </div>
 
-        <Footer onHistory={goHistory} />
+        <Footer onHistory={goHistory} onNavigate={navigate} onStore={goStore} />
       </main>
 
       <MobileDock
@@ -6512,6 +6604,7 @@ export default function App() {
         onHistory={goHistory}
         inventoryCount={user.inventory.length}
         promoBadge={unseenPromos}
+        activeSection={activeSection}
       />
 
       <ToastStack toasts={toasts} />
@@ -6552,18 +6645,6 @@ export default function App() {
           onClose={() => setDonateOpen(false)}
           onUpdate={applyUpdate}
           onToast={pushToast}
-        />
-      )}
-
-      {settingsOpen && (
-        <SettingsModal
-          user={user}
-          soundOn={soundOn}
-          fast={fast}
-          onToggleSound={toggleSound}
-          onToggleFast={toggleFast}
-          onLogout={handleLogout}
-          onClose={() => setSettingsOpen(false)}
         />
       )}
 
