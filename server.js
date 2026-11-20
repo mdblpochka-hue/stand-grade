@@ -261,17 +261,25 @@ function makePool(weights) {
 
 /*
  * Шансы платных кейсов строятся от отношения «цена скина / цена кейса».
- * Основная масса веса — узкий диапазон вокруг стоимости кейса
- * (скины чуть дороже и чуть дешевле), поэтому игрок чаще всего
- * забирает предмет примерно своего номинала.
+ * Базовые (узкие) параметры задают эталонный RTP кейса. Рабочий пул строится
+ * по более широкому распределению с равномерной добавкой: в дроп попадает
+ * намного больше разных скинов, а не только два предмета около номинала.
+ * Центр широкого распределения подбирается так, чтобы RTP остался прежним.
  * Хвосты распределения задавлены:
- *   • плохой дроп  (цена < 1/3 кейса)  — очень низкий шанс;
+ *   • плохой дроп  (цена < 1/3 кейса)  — низкий, но заметный шанс;
  *   • хороший дроп (цена ≥ 3× кейса)   — ровно ~0.1 % суммарно на кейс,
  *     причём более дорогие предметы внутри этой группы выпадают реже.
  */
 const RATIO_CENTER = 0.8
 const RATIO_SIGMA_LOW = 0.24
 const RATIO_SIGMA_HIGH = 0.2
+
+// Рабочие кейсы используют более широкое распределение: в дроп попадает
+// заметно больше разных скинов, а не только два предмета вокруг номинала.
+const SPREAD_SIGMA_LOW = 0.5
+const SPREAD_SIGMA_HIGH = 0.47
+// Небольшая равномерная добавка даёт шанс даже далёким предметам каталога.
+const SPREAD_FLAT = 0.15
 const GOOD_DROP_RATE = 0.001
 const GOOD_DROP_DECAY = 2
 const MIN_RATIO = 1 / 12
@@ -281,7 +289,7 @@ const MIN_RATIO = 1 / 12
  * округляются до нуля и в пул не попадают, а шансы остаются непрерывными. */
 const WEIGHT_SCALE = 1e9
 
-function makeRatioPool(casePrice) {
+function ratioEntries(casePrice, { center, sigmaLow, sigmaHigh, flat = 0, round = false }) {
   const near = []
   const good = []
   let nearMass = 0
@@ -299,29 +307,73 @@ function makeRatioPool(casePrice) {
       continue
     }
 
-    const spread = Math.log(Math.max(ratio, 1e-6)) - Math.log(RATIO_CENTER)
-    const sigma = spread < 0 ? RATIO_SIGMA_LOW : RATIO_SIGMA_HIGH
+    const spread = Math.log(Math.max(ratio, 1e-6)) - Math.log(center)
+    const sigma = spread < 0 ? sigmaLow : sigmaHigh
     const bell = Math.exp(-(spread * spread) / (2 * sigma * sigma))
     near.push([skin, bell])
     nearMass += bell
   }
 
-  const pool = []
-  for (const [skin, bell] of near) {
-    const weight = Math.round(bell * WEIGHT_SCALE)
-    if (weight >= 1) pool.push([skin.id, weight])
-  }
+  const averageBell = near.length ? nearMass / near.length : 0
+  const entries = near.map(([skin, bell]) => [skin, bell + averageBell * flat])
+  const nearTotal = entries.reduce((sum, [, weight]) => sum + weight, 0)
 
   // Нормируем хорошие дропы так, чтобы их суммарный шанс был одинаковым (~0.1 %) в любом кейсе.
-  if (good.length > 0 && goodShape > 0 && nearMass > 0) {
-    const scale = (GOOD_DROP_RATE / (1 - GOOD_DROP_RATE)) * (nearMass / goodShape)
-    for (const [skin, shape] of good) {
-      const weight = Math.round(shape * scale * WEIGHT_SCALE)
-      if (weight >= 1) pool.push([skin.id, weight])
-    }
+  if (good.length > 0 && goodShape > 0 && nearTotal > 0) {
+    const scale = (GOOD_DROP_RATE / (1 - GOOD_DROP_RATE)) * (nearTotal / goodShape)
+    for (const [skin, shape] of good) entries.push([skin, shape * scale])
   }
 
-  return pool
+  if (!round) return entries
+  return entries
+    .map(([skin, weight]) => [skin.id, Math.round(weight * WEIGHT_SCALE)])
+    .filter(([, weight]) => weight >= 1)
+}
+
+function expectedRatio(casePrice, params) {
+  const entries = ratioEntries(casePrice, params)
+  let total = 0
+  let value = 0
+  for (const [skin, weight] of entries) {
+    total += weight
+    value += skin.price * weight
+  }
+  return total > 0 ? value / total / casePrice : 0
+}
+
+function tuneSpreadCenter(casePrice, target) {
+  let lo = 0.2
+  let hi = 2
+  for (let index = 0; index < 48; index += 1) {
+    const mid = (lo + hi) / 2
+    const ratio = expectedRatio(casePrice, {
+      center: mid,
+      sigmaLow: SPREAD_SIGMA_LOW,
+      sigmaHigh: SPREAD_SIGMA_HIGH,
+      flat: SPREAD_FLAT,
+    })
+    if (ratio < target) lo = mid
+    else hi = mid
+  }
+  return (lo + hi) / 2
+}
+
+function makeRatioPool(casePrice) {
+  // Сначала считаем прежний RTP кейса, затем подбираем центр широкого
+  // распределения так, чтобы экономика кейса не изменилась.
+  const target = expectedRatio(casePrice, {
+    center: RATIO_CENTER,
+    sigmaLow: RATIO_SIGMA_LOW,
+    sigmaHigh: RATIO_SIGMA_HIGH,
+  })
+  const center = tuneSpreadCenter(casePrice, target)
+  return ratioEntries(casePrice, {
+    center,
+    sigmaLow: SPREAD_SIGMA_LOW,
+    sigmaHigh: SPREAD_SIGMA_HIGH,
+    flat: SPREAD_FLAT,
+    round: true,
+  })
 }
 
 const CASE_DEFS = [
