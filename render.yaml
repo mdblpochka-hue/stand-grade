@@ -19,3 +19,7 @@ services:
         sync: false
       - key: ADMIN_START_BALANCE
         value: "100000"
+      - key: OWNER_PASSWORD
+        sync: false
+      - key: OWNER_START_BALANCE
+        value: "500000"

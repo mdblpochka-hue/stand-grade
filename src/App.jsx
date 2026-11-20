@@ -39,6 +39,7 @@ const RARITY = {
 
 const ANIM_MS_NORMAL = 3500
 const ANIM_MS_FAST = 500
+const UPGRADE_EDGE = 0.9
 const REEL_EASING = 'cubic-bezier(.52,.02,.08,1)'
 const WINNER_INDEX = 34
 const OPEN_COUNTS = [1, 2, 3, 4, 5, 10]
@@ -333,6 +334,18 @@ const ICONS = {
       <path d="M3 4v5h5M12 8v4l3 2" />
     </>
   ),
+  ticket: (
+    <>
+      <path d="M3 9V6a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v3a3 3 0 0 0 0 6v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-3a3 3 0 0 0 0-6Z" />
+      <path d="M14 5v14" strokeDasharray="2 3" />
+    </>
+  ),
+  snowflake: (
+    <>
+      <path d="M12 2v20M4.2 6.5l15.6 11M19.8 6.5 4.2 17.5" />
+      <path d="m9.2 4.6 2.8 2.4 2.8-2.4M9.2 19.4l2.8-2.4 2.8 2.4" />
+    </>
+  ),
 }
 
 function Icon({ name, size = 18, className = '', strokeWidth = 2 }) {
@@ -402,6 +415,20 @@ const SKIN_PALETTES = {
   'akr-treasure-hunter': ['#f7e5bb', '#c58a39', '#2f1b08'],
   'm4a1-year-of-the-tiger': ['#ffe0b0', '#ff9d13', '#3d1c00'],
   'sting-mimicry': ['#dfffe8', '#26f06a', '#03301a'],
+  'karambit-snow-camo': ['#eef9ff', '#8fd8ff', '#0a2f47'],
+  'm9-dark-shiver': ['#e3f2ff', '#5f9dff', '#081d3d'],
+  'butterfly-saphira': ['#e6e2ff', '#8a6bff', '#170a3d'],
+  'dual-daggers-frost-nova': ['#e9fbff', '#78d8ff', '#062f45'],
+  'gloves-burning-fists': ['#ffe3c9', '#ff7a2e', '#3d1202'],
+  'gloves-punk': ['#ffd9ec', '#ff3d9a', '#3a0620'],
+  'm4a1-kitsune': ['#ffe4d1', '#ff8a3d', '#3d1503'],
+  'awm-boom': ['#ffe0d6', '#ff5a3c', '#3a0d05'],
+  'deagle-orochi': ['#e8ddff', '#a06bff', '#1d0a3d'],
+  'p350-forest-spirit': ['#dcffe8', '#39d98a', '#062f1d'],
+  'famas-fury': ['#ffdcdc', '#ff4d4d', '#3d0505'],
+  'm60-steam-beast': ['#e7d9c9', '#a8794a', '#2b1a08'],
+  'usp-chameleon': ['#dcffe9', '#3dffb0', '#063d2b'],
+  'akr-sport': ['#e1f0ff', '#4a9dff', '#081f3d'],
 }
 
 const FALLBACK_PALETTES = {
@@ -440,6 +467,9 @@ const WEAPON_KIND = {
   Flip: 'bayonet',
   Mantis: 'karambit',
   Sting: 'karambit',
+  'Dual Daggers': 'kunai',
+  SM1014: 'rifle',
+  M60: 'rifle',
 }
 
 function getPalette(skin) {
@@ -951,10 +981,22 @@ const NAV_ITEMS = [
   { id: 'cases', label: 'Кейсы', icon: 'box' },
   { id: 'craft', label: 'Крафт', icon: 'sparkles' },
   { id: 'battle', label: 'Битва', icon: 'flame' },
+  { id: 'promos', label: 'Промокоды', icon: 'ticket' },
   { id: 'inventory', label: 'Инвентарь', icon: 'archive' },
 ]
 
-function Header({ user, online, soundOn, onNavigate, onStore, onDonate, onHistory, onToggleSound, onLogout }) {
+function Header({
+  user,
+  online,
+  soundOn,
+  promoBadge = 0,
+  onNavigate,
+  onStore,
+  onDonate,
+  onHistory,
+  onToggleSound,
+  onLogout,
+}) {
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef(null)
 
@@ -994,6 +1036,11 @@ function Header({ user, online, soundOn, onNavigate, onStore, onDonate, onHistor
             >
               <Icon name={item.icon} size={14} className="text-white/28 group-hover:text-acid/70" />
               {item.label}
+              {item.id === 'promos' && promoBadge > 0 && (
+                <span className="promo-badge flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ffcf4d] px-1 text-[9px] font-black text-[#241a00]">
+                  !
+                </span>
+              )}
             </button>
           ))}
           <button
@@ -1077,12 +1124,16 @@ function Header({ user, online, soundOn, onNavigate, onStore, onDonate, onHistor
                     <div className="min-w-0">
                       <div className="truncate text-sm font-extrabold text-white">{user.username}</div>
                       <div className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.16em] text-white/30">
-                        {user.role === 'admin' ? 'Скрытый администратор' : 'Player account'}
+                        {user.role === 'owner'
+                          ? 'Владелец проекта'
+                          : user.role === 'admin'
+                            ? 'Скрытый администратор'
+                            : 'Player account'}
                       </div>
                     </div>
-                    {user.role === 'admin' && (
+                    {(user.role === 'admin' || user.role === 'owner') && (
                       <span className="rounded-md border border-lime/25 bg-lime/10 px-1.5 py-1 text-[8px] font-black tracking-[0.12em] text-lime">
-                        ADMIN
+                        {user.role === 'owner' ? 'OWNER' : 'ADMIN'}
                       </span>
                     )}
                   </div>
@@ -1132,15 +1183,16 @@ function Header({ user, online, soundOn, onNavigate, onStore, onDonate, onHistor
   )
 }
 
-function MobileDock({ onNavigate, onStore, onHistory, inventoryCount }) {
+function MobileDock({ onNavigate, onStore, onHistory, inventoryCount, promoBadge = 0 }) {
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-white/[0.07] bg-[#080d09]/95 backdrop-blur-xl lg:hidden">
-      <div className="safe-bottom grid grid-cols-6 px-1.5 pb-1 pt-1.5">
+      <div className="safe-bottom grid grid-cols-7 px-1 pb-1 pt-1.5">
         {[
           { id: 'cases', label: 'Кейсы', icon: 'box' },
           { id: 'craft', label: 'Крафт', icon: 'sparkles' },
           { id: 'battle', label: 'Битва', icon: 'flame' },
           { id: 'upgrade', label: 'Апгрейд', icon: 'refresh' },
+          { id: 'promos', label: 'Промо', icon: 'ticket' },
           { id: 'history', label: 'История', icon: 'history' },
           { id: 'inventory', label: 'Инвентарь', icon: 'archive' },
         ].map((item) => (
@@ -1159,6 +1211,11 @@ function MobileDock({ onNavigate, onStore, onHistory, inventoryCount }) {
               {item.id === 'inventory' && inventoryCount > 0 && (
                 <span className="absolute -right-2.5 -top-2 min-w-4 rounded-full bg-acid px-1 text-center text-[7px] font-black leading-4 text-[#041007]">
                   {inventoryCount > 99 ? '99' : inventoryCount}
+                </span>
+              )}
+              {item.id === 'promos' && promoBadge > 0 && (
+                <span className="absolute -right-2.5 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ffcf4d] px-1 text-[8px] font-black leading-4 text-[#241a00]">
+                  !
                 </span>
               )}
             </span>
@@ -2391,6 +2448,347 @@ function BattleSection({ cases, user, token, onUpdate, onToast }) {
 /*  Upgrade                                                            */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/*  Winter event & promo codes                                        */
+/* ------------------------------------------------------------------ */
+
+function WinterSnow() {
+  const flakes = useMemo(
+    () =>
+      Array.from({ length: 46 }, (_, index) => ({
+        id: index,
+        left: (index * 37 + 11) % 100,
+        size: 2 + ((index * 7) % 5),
+        delay: -((index * 0.83) % 14),
+        duration: 9 + (index % 7) * 2.1,
+        opacity: 0.2 + (index % 5) * 0.13,
+        drift: index % 2 === 0 ? 28 : -24,
+      })),
+    [],
+  )
+
+  return (
+    <div className="pointer-events-none fixed inset-0 z-20 overflow-hidden" aria-hidden="true">
+      {flakes.map((flake) => (
+        <span
+          key={flake.id}
+          className="snowflake"
+          style={{
+            left: `${flake.left}%`,
+            width: `${flake.size}px`,
+            height: `${flake.size}px`,
+            opacity: flake.opacity,
+            animationDelay: `${flake.delay}s`,
+            animationDuration: `${flake.duration}s`,
+            '--snow-drift': `${flake.drift}px`,
+          }}
+        />
+      ))}
+    </div>
+  )
+}
+
+function WinterEventBar({ event, onNavigate }) {
+  if (!event?.active) return null
+  const endsAt = new Date(event.endsAt)
+  return (
+    <div className="winter-bar relative z-30 border-b border-[#9fdcff]/20">
+      <div className="mx-auto flex max-w-[1540px] flex-wrap items-center justify-between gap-2 px-3 py-2 sm:px-6 xl:px-8">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border border-[#bfe9ff]/30 bg-[#bfe9ff]/10 text-[#d8f4ff]">
+            <Icon name="snowflake" size={13} />
+          </span>
+          <span className="truncate text-[9px] font-black uppercase tracking-[0.16em] text-[#e4f7ff]">
+            {event.name}
+          </span>
+          <span className="hidden truncate text-[9px] font-semibold text-[#bfe9ff]/65 sm:inline">
+            +{event.depositBonusPercent}% к пополнению · снежная коллекция в кейсах
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[8px] font-bold uppercase tracking-[0.1em] text-[#bfe9ff]/55">
+            до {endsAt.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}
+          </span>
+          <button
+            type="button"
+            onClick={() => onNavigate('promos')}
+            className="rounded-lg border border-[#bfe9ff]/25 bg-[#bfe9ff]/10 px-2.5 py-1 text-[8px] font-black uppercase tracking-[0.1em] text-[#e4f7ff] transition hover:bg-[#bfe9ff]/20"
+          >
+            Зимние промо
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PromoSection({ promos, user, token, event, onUpdate, onToast }) {
+  const [code, setCode] = useState('')
+  const [activating, setActivating] = useState(false)
+  const [newCode, setNewCode] = useState('')
+  const [amount, setAmount] = useState('250')
+  const [maxUses, setMaxUses] = useState('100')
+  const [creating, setCreating] = useState(false)
+  const [error, setError] = useState('')
+  const list = promos?.list || []
+  const unseen = Number(promos?.unseenCount) || 0
+
+  async function activate(event_) {
+    event_?.preventDefault?.()
+    if (activating) return
+    const value = code.trim()
+    if (!value) return
+    setActivating(true)
+    setError('')
+    try {
+      const data = await apiRequest('/api/promos/activate', {
+        method: 'POST',
+        token,
+        body: { code: value },
+      })
+      onUpdate(data)
+      onUpdate({ promos: data.promos })
+      onToast(data.message, 'success', 'Промокод активирован')
+      playCoin()
+      setCode('')
+    } catch (requestError) {
+      setError(requestError.message)
+      onToast(requestError.message, 'error')
+      if (requestError.data?.user) onUpdate(requestError.data)
+    } finally {
+      setActivating(false)
+    }
+  }
+
+  async function createPromo(event_) {
+    event_?.preventDefault?.()
+    if (creating) return
+    setCreating(true)
+    setError('')
+    try {
+      const data = await apiRequest('/api/promos', {
+        method: 'POST',
+        token,
+        body: {
+          code: newCode.trim() || undefined,
+          amount: Number(amount) || 0,
+          maxUses: Number(maxUses) || 0,
+        },
+      })
+      onUpdate({ promos: data.promos })
+      onToast(data.message, 'success', 'Промокод создан')
+      setNewCode('')
+    } catch (requestError) {
+      setError(requestError.message)
+      onToast(requestError.message, 'error')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  async function copyCode(value) {
+    try {
+      await navigator.clipboard.writeText(value)
+      onToast(`Промокод ${value} скопирован`, 'info', 'Скопировано')
+    } catch {
+      onToast(value, 'info', 'Промокод')
+    }
+  }
+
+  return (
+    <section id="promos" className="pt-10 sm:pt-14">
+      <SectionHeading
+        eyebrow="PROMO CODES"
+        title="Промокоды и зимний ивент"
+        description="Активируй промокод и забери голду. Когда владелец добавляет новый код, у вкладки «Промокоды» загорается восклицательный знак."
+      />
+
+      {unseen > 0 && (
+        <div className="fade-up mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#ffcf4d]/30 bg-[#ffcf4d]/[0.08] px-3 py-2.5">
+          <span className="flex items-center gap-2 text-[10px] font-bold text-[#ffe6a3]">
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#ffcf4d] text-[11px] font-black text-[#241a00]">
+              !
+            </span>
+            Новые промокоды: {unseen}. Проверь список ниже.
+          </span>
+          <button
+            type="button"
+            onClick={() => onUpdate({ promos: { ...promos, unseenCount: 0 } })}
+            className="rounded-lg border border-[#ffcf4d]/30 px-2.5 py-1 text-[8px] font-black uppercase tracking-[0.1em] text-[#ffe6a3] transition hover:bg-[#ffcf4d]/15"
+          >
+            Понятно
+          </button>
+        </div>
+      )}
+
+      <div className="grid gap-3 lg:grid-cols-[1.05fr_.95fr]">
+        <div className="relative overflow-hidden rounded-[22px] border border-white/[0.08] bg-[linear-gradient(155deg,#0e1714,#090d0b)] p-4 sm:p-5">
+          <div className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full bg-[#7bdcff]/10 blur-3xl" />
+          <div className="relative flex items-center gap-2">
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-acid/20 bg-acid/[0.08] text-acid">
+              <Icon name="ticket" size={15} />
+            </span>
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.14em] text-white/70">Активация</div>
+              <div className="text-[8px] font-semibold text-white/30">Один промокод — один раз на аккаунт</div>
+            </div>
+          </div>
+
+          <form onSubmit={activate} className="relative mt-3 flex gap-2">
+            <input
+              value={code}
+              onChange={(event_) => setCode(event_.target.value.toUpperCase())}
+              placeholder="WINTER2026"
+              maxLength={24}
+              className="h-11 min-w-0 flex-1 rounded-xl border border-white/[0.09] bg-black/30 px-3 text-[12px] font-bold uppercase tracking-[0.08em] text-white placeholder:text-white/22 focus:border-acid/45 focus:outline-none"
+            />
+            <button
+              type="submit"
+              disabled={activating || !code.trim()}
+              className="btn-acid h-11 shrink-0 px-4 text-[10px] uppercase tracking-[0.08em] disabled:opacity-40"
+            >
+              {activating ? <span className="spin-ring h-4 w-4 rounded-full border-2 border-[#041007]/30 border-t-[#041007]" /> : 'Активировать'}
+            </button>
+          </form>
+
+          {error && <div className="mt-2 text-[9px] font-semibold text-[#ff8b9e]">{error}</div>}
+
+          {event?.active && (
+            <div className="relative mt-4 flex items-center gap-3 rounded-xl border border-[#9fdcff]/20 bg-[#9fdcff]/[0.06] p-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#bfe9ff]/12 text-[#d8f4ff]">
+                <Icon name="snowflake" size={18} />
+              </span>
+              <div className="min-w-0">
+                <div className="text-[9px] font-black uppercase tracking-[0.12em] text-[#e4f7ff]">
+                  {event.name} · +{event.depositBonusPercent}% к пополнению
+                </div>
+                <div className="mt-0.5 text-[8px] font-semibold text-[#bfe9ff]/55">
+                  Бонус начисляется автоматически при донате. До{' '}
+                  {new Date(event.endsAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}.
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="relative overflow-hidden rounded-[22px] border border-white/[0.08] bg-[linear-gradient(155deg,#14110b,#0a0d09)] p-4 sm:p-5">
+          <div className="pointer-events-none absolute -left-16 -top-16 h-44 w-44 rounded-full bg-[#ffcf4d]/10 blur-3xl" />
+          <div className="relative flex items-center justify-between gap-2">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.14em] text-white/70">
+                {promos?.canCreate ? 'Создание промокода' : 'Активные промокоды'}
+              </div>
+              <div className="text-[8px] font-semibold text-white/30">
+                {promos?.canCreate
+                  ? 'Доступно владельцу проекта и администратору'
+                  : 'Коды можно активировать в поле слева'}
+              </div>
+            </div>
+            <Icon name="crown" size={18} className="text-[#ffcf4d]/60" />
+          </div>
+
+          {promos?.canCreate && (
+            <form onSubmit={createPromo} className="relative mt-3 space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block">
+                  <span className="mb-1 block text-[7px] font-black uppercase tracking-[0.12em] text-white/28">Код (пусто = авто)</span>
+                  <input
+                    value={newCode}
+                    onChange={(event_) => setNewCode(event_.target.value.toUpperCase())}
+                    placeholder="WINTER2026"
+                    maxLength={24}
+                    className="h-9 w-full rounded-lg border border-white/[0.09] bg-black/30 px-2.5 text-[10px] font-bold uppercase tracking-[0.06em] text-white placeholder:text-white/20 focus:border-[#ffcf4d]/40 focus:outline-none"
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-[7px] font-black uppercase tracking-[0.12em] text-white/28">Награда, G</span>
+                  <input
+                    value={amount}
+                    onChange={(event_) => setAmount(event_.target.value.replace(/[^0-9]/g, ''))}
+                    inputMode="numeric"
+                    className="h-9 w-full rounded-lg border border-white/[0.09] bg-black/30 px-2.5 text-[10px] font-bold tabular-nums text-white focus:border-[#ffcf4d]/40 focus:outline-none"
+                  />
+                </label>
+              </div>
+              <div className="flex items-end gap-2">
+                <label className="block w-28">
+                  <span className="mb-1 block text-[7px] font-black uppercase tracking-[0.12em] text-white/28">Активаций</span>
+                  <input
+                    value={maxUses}
+                    onChange={(event_) => setMaxUses(event_.target.value.replace(/[^0-9]/g, ''))}
+                    inputMode="numeric"
+                    className="h-9 w-full rounded-lg border border-white/[0.09] bg-black/30 px-2.5 text-[10px] font-bold tabular-nums text-white focus:border-[#ffcf4d]/40 focus:outline-none"
+                  />
+                </label>
+                <button
+                  type="submit"
+                  disabled={creating}
+                  className="h-9 flex-1 rounded-lg border border-[#ffcf4d]/35 bg-[#ffcf4d]/12 text-[9px] font-black uppercase tracking-[0.08em] text-[#ffe6a3] transition hover:bg-[#ffcf4d]/20 disabled:opacity-40"
+                >
+                  {creating ? 'Создаём...' : 'Создать промокод'}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-3 overflow-hidden rounded-[22px] border border-white/[0.07] bg-white/[0.018]">
+        <div className="flex items-center justify-between gap-2 border-b border-white/[0.06] px-4 py-2.5">
+          <span className="text-[8px] font-black uppercase tracking-[0.14em] text-white/35">
+            Все промокоды · {list.length}
+          </span>
+          <span className="text-[8px] font-semibold text-white/22">Нажми на код, чтобы скопировать</span>
+        </div>
+        {list.length ? (
+          <div className="divide-y divide-white/[0.05]">
+            {list.map((promo) => (
+              <div key={promo.id} className="flex flex-wrap items-center gap-2 px-4 py-2.5">
+                <button
+                  type="button"
+                  onClick={() => copyCode(promo.code)}
+                  className="rounded-md border border-white/[0.1] bg-black/25 px-2 py-1 font-mono text-[10px] font-bold tracking-[0.08em] text-white/80 transition hover:border-acid/30 hover:text-acid"
+                  title="Скопировать промокод"
+                >
+                  {promo.code}
+                </button>
+                <span className="rounded-md border border-acid/20 bg-acid/[0.06] px-2 py-1 text-[9px] font-extrabold tabular-nums text-acid">
+                  +{formatPrice(promo.amount)}
+                </span>
+                <span className="text-[8px] font-semibold text-white/28">
+                  осталось {promo.remaining} из {promo.maxUses}
+                  {promo.createdBy ? ` · ${promo.createdBy === 'system' || promo.createdBy === 'winter-event' ? 'система' : promo.createdBy}` : ''}
+                </span>
+                <span className="ml-auto flex items-center gap-1.5">
+                  {promo.activated && (
+                    <span className="rounded-md border border-white/[0.1] bg-white/[0.04] px-2 py-1 text-[7px] font-black uppercase tracking-[0.08em] text-white/45">
+                      активирован
+                    </span>
+                  )}
+                  {!promo.activated && !promo.exhausted && (
+                    <span className="rounded-md border border-acid/25 bg-acid/[0.07] px-2 py-1 text-[7px] font-black uppercase tracking-[0.08em] text-acid">
+                      доступен
+                    </span>
+                  )}
+                  {promo.exhausted && (
+                    <span className="rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-1 text-[7px] font-black uppercase tracking-[0.08em] text-white/30">
+                      закончился
+                    </span>
+                  )}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="px-4 py-8 text-center text-[10px] font-semibold text-white/30">
+            Промокодов пока нет. Владелец проекта может создать первый.
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
 function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, onToast }) {
   const inventory = user.inventory
   const [baseId, setBaseId] = useState(inventory[0]?.instanceId || null)
@@ -2398,6 +2796,8 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
   const [upgrading, setUpgrading] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
+  const [boost, setBoost] = useState(0)
+  const [customChance, setCustomChance] = useState('')
   const [spin, setSpin] = useState(null)
   const needleRef = useRef(null)
   const duration = fast ? ANIM_MS_FAST : ANIM_MS_NORMAL
@@ -2414,12 +2814,21 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
     () => higherTargets.find((skin) => skin.id === targetId) || null,
     [higherTargets, targetId],
   )
+  const maxBoost = base && target ? Math.max(0, Math.round((target.price * UPGRADE_EDGE - base.price) * 100) / 100) : 0
+  const boostCap = Math.min(maxBoost, Math.max(0, user.balance))
   const chance =
+    base && target
+      ? Math.min(
+          90,
+          Math.max(1, Math.round(((base.price + boost) / target.price) * 90 * 100) / 100),
+        )
+      : 0
+  const naturalChance =
     base && target
       ? Math.min(90, Math.max(1, Math.round((base.price / target.price) * 90 * 100) / 100))
       : 0
-  const profit = base && target ? Math.round((target.price - base.price) * 100) / 100 : 0
-  const multiplier = base && target ? target.price / base.price : 0
+  const profit = base && target ? Math.round((target.price - base.price - boost) * 100) / 100 : 0
+  const multiplier = base && target ? target.price / (base.price + boost) : 0
 
   useEffect(() => {
     if (!inventory.length) {
@@ -2460,7 +2869,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
       setUpgrading(false)
       playUpgradeResult(spin.data.won)
       onToast(
-        spin.data.won ? `Апгрейд успешен: ${spin.data.targetSkin.name}` : 'Апгрейд не удался',
+        spin.data.message || (spin.data.won ? `Апгрейд успешен: ${spin.data.targetSkin.name}` : 'Апгрейд не удался'),
         spin.data.won ? 'success' : 'error',
       )
     }, duration + 120)
@@ -2483,6 +2892,8 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
     if (upgrading) return
     setBaseId(item.instanceId)
     setTargetId(null)
+    setBoost(0)
+    setCustomChance('')
     setResult(null)
     setError('')
     resetWheel()
@@ -2491,6 +2902,8 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
   function chooseTarget(skin) {
     if (upgrading) return
     setTargetId(skin.id)
+    setBoost(0)
+    setCustomChance('')
     setResult(null)
     setError('')
     resetWheel()
@@ -2505,7 +2918,41 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
       const bestDistance = Math.abs(closest.price - ideal)
       return currentDistance < bestDistance ? skin : closest
     }, higherTargets[0])
+    setBoost(0)
+    setCustomChance(String(chancePercent))
     chooseTarget(best)
+  }
+
+  function applyCustomChance(value) {
+    if (!base || !higherTargets.length) return
+    const percent = Math.min(90, Math.max(1, Number(value) || 1))
+    // Ищем цель, для которой нужна минимальная доплата, и добиваем шанс балансом.
+    const options = higherTargets
+      .map((skin) => ({
+        skin,
+        need: Math.round((skin.price * (percent / 90) - base.price) * 100) / 100,
+      }))
+      .filter((option) => option.need >= -0.01)
+      .sort((a, b) => a.need - b.need)
+    const option = options[0]
+    if (!option) {
+      setError('Для такого шанса нужна цель подороже')
+      return
+    }
+    setTargetId(option.skin.id)
+    const needed = Math.max(0, option.need)
+    const affordable = Math.min(needed, Math.max(0, user.balance), Math.max(0, option.skin.price * UPGRADE_EDGE - base.price))
+    setBoost(Math.round(affordable * 100) / 100)
+    setCustomChance(String(percent))
+    setError(needed > user.balance ? 'Недостаточно баланса для точного шанса — доплата ограничена' : '')
+    setResult(null)
+    resetWheel()
+  }
+
+  function updateBoost(value) {
+    const numeric = Math.max(0, Number(value) || 0)
+    setBoost(Math.min(boostCap, Math.round(numeric * 100) / 100))
+    setCustomChance('')
   }
 
   async function runUpgrade() {
@@ -2518,7 +2965,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
       const data = await apiRequest('/api/upgrade', {
         method: 'POST',
         token,
-        body: { instanceId: base.instanceId, targetSkinId: target.id },
+        body: { instanceId: base.instanceId, targetSkinId: target.id, boost },
       })
       const serverChance = Math.max(0, Math.min(100, Number(data.chance) || 0))
       const winDeg = serverChance * 3.6
@@ -2908,6 +3355,91 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                     )
                   })}
                 </div>
+
+                <div className="mt-3 rounded-xl border border-white/[0.07] bg-white/[0.02] p-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[8px] font-black uppercase tracking-[0.14em] text-white/38">
+                      Тонкая настройка шанса
+                    </span>
+                    <span className="text-[8px] font-semibold text-white/24">
+                      базовый {naturalChance ? `${naturalChance.toFixed(naturalChance >= 10 ? 0 : 1)}%` : '—'}
+                    </span>
+                  </div>
+
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-1 block text-[7px] font-black uppercase tracking-[0.12em] text-white/26">
+                        Желаемый шанс, %
+                      </span>
+                      <span className="flex gap-1.5">
+                        <input
+                          value={customChance}
+                          onChange={(event_) => setCustomChance(event_.target.value.replace(/[^0-9.]/g, ''))}
+                          onKeyDown={(event_) => {
+                            if (event_.key === 'Enter') {
+                              event_.preventDefault()
+                              applyCustomChance(customChance)
+                            }
+                          }}
+                          inputMode="decimal"
+                          placeholder="37"
+                          disabled={!base || !higherTargets.length || upgrading}
+                          className="h-9 min-w-0 flex-1 rounded-lg border border-white/[0.09] bg-black/30 px-2.5 text-[10px] font-bold tabular-nums text-white placeholder:text-white/20 focus:border-acid/40 focus:outline-none disabled:opacity-40"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => applyCustomChance(customChance)}
+                          disabled={!base || !higherTargets.length || upgrading}
+                          className="shrink-0 rounded-lg border border-acid/25 bg-acid/[0.08] px-2.5 text-[8px] font-black uppercase tracking-[0.06em] text-acid transition hover:bg-acid/[0.14] disabled:opacity-30"
+                        >
+                          Задать
+                        </button>
+                      </span>
+                    </label>
+
+                    <label className="block">
+                      <span className="mb-1 block text-[7px] font-black uppercase tracking-[0.12em] text-white/26">
+                        Доплата из баланса, G
+                      </span>
+                      <span className="flex gap-1.5">
+                        <input
+                          value={boost || ''}
+                          onChange={(event_) => updateBoost(event_.target.value.replace(/[^0-9.]/g, ''))}
+                          onBlur={() => setBoost((value) => Math.min(boostCap, Math.max(0, Math.round(value * 100) / 100)))}
+                          inputMode="decimal"
+                          placeholder="0"
+                          disabled={!base || !target || upgrading || boostCap <= 0}
+                          className="h-9 min-w-0 flex-1 rounded-lg border border-white/[0.09] bg-black/30 px-2.5 text-[10px] font-bold tabular-nums text-white placeholder:text-white/20 focus:border-acid/40 focus:outline-none disabled:opacity-40"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setBoost(boostCap)}
+                          disabled={!base || !target || upgrading || boostCap <= 0}
+                          className="shrink-0 rounded-lg border border-white/[0.1] bg-white/[0.04] px-2 text-[8px] font-black uppercase tracking-[0.06em] text-white/55 transition hover:border-acid/30 hover:text-acid disabled:opacity-30"
+                        >
+                          Макс
+                        </button>
+                      </span>
+                    </label>
+                  </div>
+
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-1.5 rounded-lg bg-black/25 px-2 py-1.5 text-[8px] font-semibold">
+                    <span className="text-white/30">
+                      Итоговый шанс:{' '}
+                      <span className="font-black tabular-nums text-acid">{chance ? `${chance.toFixed(chance >= 10 ? 0 : 1)}%` : '—'}</span>
+                    </span>
+                    <span className="text-white/30">
+                      Вход:{' '}
+                      <span className="font-black tabular-nums text-white/70">
+                        {base ? formatPrice(base.price + boost) : '—'}
+                      </span>
+                      {boost > 0 ? ` (скин + ${formatPrice(boost)})` : ''}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-[7px] font-semibold text-white/20">
+                    Доплата списывается при запуске и повышает шанс тем сильнее, чем дешевле цель относительно скина.
+                  </div>
+                </div>
               </div>
 
               <button
@@ -2924,7 +3456,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                 ) : (
                   <>
                     <Icon name="refresh" size={16} strokeWidth={2.6} />
-                    {target ? `Апгрейд за ${base ? formatPrice(base.price) : ''}` : 'Выберите цель'}
+                    {target ? `Апгрейд за ${base ? formatPrice(base.price + boost) : ''}` : 'Выберите цель'}
                     {target && <span className="text-[10px] font-black text-[#041007]/55">{chance.toFixed(chance >= 10 ? 0 : 1)}%</span>}
                   </>
                 )}
@@ -2958,7 +3490,15 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                   const meta = RARITY[skin.rarity] || RARITY.Common
                   const selected = targetId === skin.id
                   const targetChance = base
-                    ? Math.min(90, Math.max(1, Math.round((base.price / skin.price) * 90 * 100) / 100))
+                    ? Math.min(
+                        90,
+                        Math.max(
+                          1,
+                          Math.round(
+                            ((base.price + (selected ? boost : 0)) / skin.price) * 90 * 100,
+                          ) / 100,
+                        ),
+                      )
                     : 0
                   return (
                     <button
@@ -3053,6 +3593,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                     <div className="mt-0.5 truncate text-[9px] text-white/38">
                       {result.won ? result.targetSkin.name : `${result.baseSkin.name} сгорел`} · шанс{' '}
                       {result.chance.toFixed(2)}%
+                      {result.boost > 0 ? ` · доплата ${formatPrice(result.boost)}` : ''}
                     </div>
                   </div>
                   <span
@@ -3064,18 +3605,29 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                     )}
                   >
                     {result.won
-                      ? `+${formatPrice(result.targetSkin.price - result.baseSkin.price)}`
-                      : `−${formatPrice(result.baseSkin.price)}`}
+                      ? `+${formatPrice(result.targetSkin.price - result.baseSkin.price - (result.boost || 0))}`
+                      : `−${formatPrice(result.baseSkin.price + (result.boost || 0))}`}
                   </span>
                 </div>
+                {!result.won && result.compensation > 0 && (
+                  <div className="flex items-center justify-between gap-2 border-t border-[#ff6d85]/15 px-3 py-2">
+                    <span className="text-[8px] font-bold uppercase tracking-[0.08em] text-[#ffb3c0]/70">
+                      Компенсация 5–10% от сгоревшего скина
+                    </span>
+                    <span className="text-[9px] font-black tabular-nums text-acid">
+                      +{formatPrice(result.compensation)}
+                    </span>
+                  </div>
+                )}
               </div>
             )}
 
             <div className="mt-4 flex items-start gap-2 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-[8px] leading-relaxed text-white/27">
               <Icon name="shield" size={12} className="mt-0.5 shrink-0 text-acid/40" />
               <span>
-                При успехе исходный скин заменяется целью. При неудаче исходный скин сгорает. Итоговый шанс и
-                результат генерируются на бэкенде STAND GRADE.
+                При успехе исходный скин заменяется целью. При неудаче скин сгорает, но 5–10% его стоимости
+                возвращается на баланс. Доплата списывается в любом случае. Итоговый шанс и результат
+                генерируются на бэкенде STAND GRADE.
               </span>
             </div>
           </div>
@@ -4696,7 +5248,7 @@ function StoreModal({ catalog, balance, token, onClose, onUpdate, onToast }) {
 const DONATE_PRESETS = [100, 500, 1000, 3000]
 const MAX_DEPOSIT = 10000000
 
-function DonateModal({ balance, token, user, daily, onClose, onUpdate, onToast }) {
+function DonateModal({ balance, token, user, daily, event, onClose, onUpdate, onToast }) {
   const [amountInput, setAmountInput] = useState('500')
   const [phase, setPhase] = useState('idle')
   const [error, setError] = useState('')
@@ -4706,6 +5258,10 @@ function DonateModal({ balance, token, user, daily, onClose, onUpdate, onToast }
   const limit = Number(daily?.limit) || 15000
   const available = isAdmin ? limit : remaining
   const amount = Math.max(0, Math.floor(Number(amountInput) || 0))
+  const bonus =
+    event?.active && !isAdmin
+      ? Math.round(amount * ((Number(event.depositBonusPercent) || 0) / 100) * 100) / 100
+      : 0
   const exceeds = !isAdmin && amount > remaining + 1e-9
   const close = useCallback(() => onClose(), [onClose])
   useEscape(close)
@@ -4864,6 +5420,18 @@ function DonateModal({ balance, token, user, daily, onClose, onUpdate, onToast }
             )}
           </label>
 
+          {event?.active && amount > 0 && (
+            <div className="mt-2.5 flex items-center justify-between gap-2 rounded-xl border border-[#9fdcff]/20 bg-[#9fdcff]/[0.06] px-3 py-2">
+              <span className="flex items-center gap-1.5 text-[8px] font-bold text-[#d8f4ff]">
+                <Icon name="snowflake" size={12} className="text-[#bfe9ff]" />
+                Зимний бонус +{event.depositBonusPercent}%
+              </span>
+              <span className="text-[9px] font-black tabular-nums text-[#d8f4ff]">
+                +{formatGold(bonus, false)} · итого {formatGold(amount + bonus, false)}
+              </span>
+            </div>
+          )}
+
           <button
             type="button"
             onClick={deposit}
@@ -4884,6 +5452,7 @@ function DonateModal({ balance, token, user, daily, onClose, onUpdate, onToast }
               <>
                 <Icon name="plus" size={15} strokeWidth={2.6} />
                 Пополнить на {formatGold(amount, false)}
+                {bonus > 0 ? ` + ${formatGold(bonus, false)}` : ''}
               </>
             ) : (
               'Введите сумму'
@@ -5438,6 +6007,7 @@ export default function App() {
   })
   const [soundOn, setSoundOn] = useState(() => isSoundEnabled())
   const toastIdRef = useRef(0)
+  const lastUnseenRef = useRef(0)
   const now = useNow()
 
   const pushToast = useCallback((message, type = 'success', title) => {
@@ -5510,6 +6080,41 @@ export default function App() {
     setOnline(Number(status.online) || 1)
   }, [status?.online])
 
+  useEffect(() => {
+    if (!token) return undefined
+    let cancelled = false
+    const loadPromos = () => {
+      apiRequest('/api/promos', { token })
+        .then((data) => {
+          if (cancelled) return
+          setStatus((previous) => (previous ? { ...previous, promos: data.promos } : previous))
+        })
+        .catch(() => {})
+    }
+    loadPromos()
+    const interval = setInterval(loadPromos, 15000)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [token])
+
+  const unseenPromos = Number(status?.promos?.unseenCount) || 0
+
+  useEffect(() => {
+    if (!status) return
+    if (unseenPromos > lastUnseenRef.current) {
+      pushToast(
+        unseenPromos === 1
+          ? 'Появился новый промокод — загляни во вкладку «Промокоды»'
+          : `Новых промокодов: ${unseenPromos} — загляни во вкладку «Промокоды»`,
+        'info',
+        'Промокоды',
+      )
+    }
+    lastUnseenRef.current = unseenPromos
+  }, [unseenPromos, status, pushToast])
+
   useBodyLock(Boolean(activeCase || storeOpen || donateOpen || historyOpen || withdrawSkin))
 
   const applyUpdate = useCallback((data) => {
@@ -5524,6 +6129,8 @@ export default function App() {
         user: data.user || previous.user,
         daily: data.daily || previous.daily,
         feed,
+        promos: data.promos || previous.promos,
+        event: data.event || previous.event,
       }
     })
   }, [])
@@ -5548,6 +6155,8 @@ export default function App() {
       catalog: data.catalog,
       feed: data.feed || [],
       online: data.online || 1,
+      promos: data.promos,
+      event: data.event,
     })
     if (Number.isFinite(Number(data.online))) setOnline(Number(data.online))
     setBooting(false)
@@ -5611,6 +6220,14 @@ export default function App() {
   }
 
   function navigate(target) {
+    if (target === 'promos' && token && unseenPromos > 0) {
+      apiRequest('/api/promos/seen', { method: 'POST', token })
+        .then((data) => {
+          setStatus((previous) => (previous ? { ...previous, promos: data.promos } : previous))
+          lastUnseenRef.current = 0
+        })
+        .catch(() => {})
+    }
     document.getElementById(target)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
@@ -5644,11 +6261,16 @@ export default function App() {
 
   return (
     <div key={user.id} className="relative min-h-screen overflow-x-hidden">
+      {status.event?.active && <WinterSnow />}
+
       <div className="pointer-events-none fixed inset-0 -z-10">
         <div className="absolute inset-0 bg-grid-faint opacity-30" />
         <div className="absolute -left-40 top-32 h-[460px] w-[460px] rounded-full bg-acid/[0.045] blur-[130px]" />
         <div className="absolute right-[-180px] top-[38%] h-[520px] w-[520px] rounded-full bg-lime/[0.035] blur-[140px]" />
         <div className="absolute bottom-0 left-1/2 h-[420px] w-[780px] -translate-x-1/2 rounded-full bg-[#10ff84]/[0.028] blur-[140px]" />
+        {status.event?.active && (
+          <div className="absolute inset-x-0 top-0 h-[420px] bg-[radial-gradient(ellipse_at_top,rgba(120,205,255,.08),transparent_70%)]" />
+        )}
       </div>
 
       <LiveBar feed={status.feed || []} online={online} username={user.username} />
@@ -5656,6 +6278,7 @@ export default function App() {
         user={user}
         online={online}
         soundOn={soundOn}
+        promoBadge={unseenPromos}
         onNavigate={navigate}
         onStore={goStore}
         onDonate={() => setDonateOpen(true)}
@@ -5663,6 +6286,7 @@ export default function App() {
         onToggleSound={toggleSound}
         onLogout={handleLogout}
       />
+      {status.event?.active && <WinterEventBar event={status.event} onNavigate={navigate} />}
 
       <main className="relative mx-auto max-w-[1540px] px-3 pb-28 sm:px-6 lg:pb-10 xl:px-8">
         <UpgradeSection
@@ -5681,6 +6305,15 @@ export default function App() {
 
         <BattleSection cases={cases} user={user} token={token} onUpdate={applyUpdate} onToast={pushToast} />
 
+        <PromoSection
+          promos={status.promos}
+          user={user}
+          token={token}
+          event={status.event}
+          onUpdate={applyUpdate}
+          onToast={pushToast}
+        />
+
         <InventorySection
           user={user}
           onSell={sellItem}
@@ -5697,6 +6330,7 @@ export default function App() {
         onStore={goStore}
         onHistory={goHistory}
         inventoryCount={user.inventory.length}
+        promoBadge={unseenPromos}
       />
 
       <ToastStack toasts={toasts} />
@@ -5733,6 +6367,7 @@ export default function App() {
           token={token}
           user={user}
           daily={daily}
+          event={status.event}
           onClose={() => setDonateOpen(false)}
           onUpdate={applyUpdate}
           onToast={pushToast}

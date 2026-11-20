@@ -387,6 +387,57 @@ select:focus-visible {
   background: linear-gradient(110deg, transparent 20%, rgba(255, 255, 255, 0.08) 46%, transparent 63%);
 }
 
+/* ------------------------------------------------------------------ */
+/*  Winter event                                                       */
+/* ------------------------------------------------------------------ */
+
+@keyframes snow-fall {
+  0% {
+    transform: translate3d(0, -12vh, 0) rotate(0deg);
+  }
+  100% {
+    transform: translate3d(var(--snow-drift, 20px), 112vh, 0) rotate(420deg);
+  }
+}
+
+.snowflake {
+  position: absolute;
+  top: 0;
+  border-radius: 9999px;
+  background: #eaf9ff;
+  box-shadow: 0 0 6px rgba(220, 245, 255, 0.7);
+  animation-name: snow-fall;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  will-change: transform;
+}
+
+.winter-bar {
+  background: linear-gradient(
+    90deg,
+    rgba(24, 62, 84, 0.55),
+    rgba(16, 38, 49, 0.52) 50%,
+    rgba(24, 62, 84, 0.55)
+  );
+  backdrop-filter: blur(10px);
+}
+
+@keyframes promo-badge-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 207, 77, 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(255, 207, 77, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 207, 77, 0);
+  }
+}
+
+.promo-badge {
+  animation: promo-badge-pulse 1.8s ease-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

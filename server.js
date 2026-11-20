@@ -22,6 +22,13 @@ fs.mkdirSync(DATA_DIR, { recursive: true })
 const PLAYER_PASSWORD = process.env.PLAYER_PASSWORD || 'player'
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'rainy'
 const ADMIN_START_BALANCE = Number(process.env.ADMIN_START_BALANCE || 100000)
+const OWNER_PASSWORD = process.env.OWNER_PASSWORD || 'owner12'
+const OWNER_START_BALANCE = Number(process.env.OWNER_START_BALANCE || 500000)
+const UPGRADE_EDGE = 0.9
+const COMPENSATION_MIN = 0.05
+const COMPENSATION_MAX = 0.1
+const PROMO_MAX_AMOUNT = 1000000
+const PROMO_MAX_USES = 100000
 const DAILY_LIMIT = 15000
 const MAX_DEPOSIT = 10000000
 const FREE_CASE_COOLDOWN_MS = 24 * 60 * 60 * 1000
@@ -171,6 +178,39 @@ const SKINS = [
   },
   { id: 'sting-mimicry', name: 'Sting Mimicry', weapon: 'Sting', rarity: 'Nameless', price: 132000 },
   { id: 'karambit-gold', name: 'Karambit Gold', weapon: 'Karambit', rarity: 'Nameless', price: 142000 },
+
+  // Furious / Empire / Frosty Chaos и другие коллекции Standoff 2
+  { id: 'g22-pattern', name: 'G22 Pattern', weapon: 'G22', rarity: 'Common', price: 0.25 },
+  { id: 'p90-fissure', name: 'P90 Fissure', weapon: 'P90', rarity: 'Common', price: 0.4 },
+  { id: 'deagle-winner', name: 'Desert Eagle Winner', weapon: 'Desert Eagle', rarity: 'Uncommon', price: 2.4 },
+  { id: 'akr12-mechanic', name: 'AKR12 Mechanic', weapon: 'AKR12', rarity: 'Uncommon', price: 4.4 },
+  { id: 'm16-facet', name: 'M16 Facet', weapon: 'M16', rarity: 'Uncommon', price: 5.8 },
+  { id: 'ump45-shark', name: 'UMP45 Shark', weapon: 'UMP45', rarity: 'Rare', price: 22 },
+  { id: 'deagle-red-dragon', name: 'Desert Eagle Red Dragon', weapon: 'Desert Eagle', rarity: 'Rare', price: 36 },
+  { id: 'awm-scratch', name: 'AWM Scratch', weapon: 'AWM', rarity: 'Rare', price: 52 },
+  { id: 'p350-oni', name: 'P350 Oni', weapon: 'P350', rarity: 'Rare', price: 28 },
+  { id: 'm40-quake', name: 'M40 Quake', weapon: 'M40', rarity: 'Epic', price: 88 },
+  { id: 'akr-sport', name: 'AKR Sport', weapon: 'AKR', rarity: 'Epic', price: 165 },
+  { id: 'm4a1-kitsune', name: 'M4A1 Kitsune', weapon: 'M4A1', rarity: 'Epic', price: 320 },
+  { id: 'usp-chameleon', name: 'USP Chameleon', weapon: 'USP', rarity: 'Epic', price: 390 },
+  { id: 'ump45-winged', name: 'UMP45 Winged', weapon: 'UMP45', rarity: 'Legendary', price: 620 },
+  { id: 'awm-gear', name: 'AWM Gear', weapon: 'AWM', rarity: 'Legendary', price: 940 },
+  { id: 'sm1014-necromancer', name: 'SM1014 Necromancer', weapon: 'SM1014', rarity: 'Legendary', price: 1180 },
+  { id: 'scorpion-holiday-frost', name: 'Scorpion Holiday Frost', weapon: 'Scorpion', rarity: 'Legendary', price: 1550 },
+  { id: 'm60-steam-beast', name: 'M60 Steam Beast', weapon: 'M60', rarity: 'Legendary', price: 1750 },
+  { id: 'deagle-orochi', name: 'Desert Eagle Orochi', weapon: 'Desert Eagle', rarity: 'Legendary', price: 2450 },
+  { id: 'p350-forest-spirit', name: 'P350 Forest Spirit', weapon: 'P350', rarity: 'Arcane', price: 3300 },
+  { id: 'famas-fury', name: 'FAMAS Fury', weapon: 'FAMAS', rarity: 'Arcane', price: 4400 },
+  { id: 'awm-boom', name: 'AWM BOOM', weapon: 'AWM', rarity: 'Arcane', price: 5400 },
+  { id: 'gloves-burning-fists', name: 'Gloves Burning Fists', weapon: 'Gloves', rarity: 'Arcane', price: 6600 },
+  { id: 'gloves-punk', name: 'Gloves Punk', weapon: 'Gloves', rarity: 'Arcane', price: 8200 },
+  { id: 'karambit-snow-camo', name: 'Karambit Snow Camo', weapon: 'Karambit', rarity: 'Arcane', price: 4300 },
+  { id: 'dual-daggers-frost-nova', name: 'Dual Daggers Frost Nova', weapon: 'Dual Daggers', rarity: 'Arcane', price: 4800 },
+  { id: 'm9-dark-shiver', name: 'M9 Bayonet Dark Shiver', weapon: 'M9 Bayonet', rarity: 'Arcane', price: 5600 },
+  { id: 'butterfly-saphira', name: 'Butterfly Saphira', weapon: 'Butterfly Knife', rarity: 'Arcane', price: 7200 },
+  { id: 'butterfly-twilight', name: 'Butterfly Twilight', weapon: 'Butterfly Knife', rarity: 'Nameless', price: 26000 },
+  { id: 'dual-daggers-harmony', name: 'Dual Daggers Harmony', weapon: 'Dual Daggers', rarity: 'Nameless', price: 30000 },
+  { id: 'm9-treasure-hunter', name: 'M9 Bayonet Treasure Hunter', weapon: 'M9 Bayonet', rarity: 'Nameless', price: 38000 },
 ]
 
 const SKIN_BY_ID = new Map(SKINS.map((skin) => [skin.id, skin]))
@@ -663,19 +703,39 @@ function makeSeedUser(username, password, role, balance) {
     pity: {},
     lastFreeCaseAt: null,
     history: emptyHistory(),
+    activatedPromos: [],
+    promoSeenAt: null,
     createdAt: new Date().toISOString(),
   }
 }
 
+function makePromo(code, amount, maxUses, createdBy = 'system') {
+  return {
+    id: crypto.randomUUID(),
+    code,
+    amount: roundGold(amount),
+    maxUses: Math.max(1, Math.trunc(maxUses)),
+    usedBy: [],
+    createdBy,
+    createdAt: new Date().toISOString(),
+  }
+}
+
+function defaultPromos() {
+  return [makePromo('WINTER2026', 250, 500, 'winter-event')]
+}
+
 function defaultState() {
   return {
-    version: 2,
+    version: 3,
     dayKey: null,
     dailyDistributed: 0,
     users: {
       player: makeSeedUser('player', PLAYER_PASSWORD, 'player', 100),
       admin: makeSeedUser('admin', ADMIN_PASSWORD, 'admin', ADMIN_START_BALANCE),
+      owner: makeSeedUser('owner', OWNER_PASSWORD, 'owner', OWNER_START_BALANCE),
     },
+    promos: defaultPromos(),
   }
 }
 
@@ -694,6 +754,8 @@ function migrateUser(user) {
   if (!Array.isArray(user.history.battles)) user.history.battles = []
   if (!user.pity || typeof user.pity !== 'object') user.pity = {}
   if (!user.lastFreeCaseAt) user.lastFreeCaseAt = null
+  if (!Array.isArray(user.activatedPromos)) user.activatedPromos = []
+  if (!user.promoSeenAt) user.promoSeenAt = null
   user.history.cases = user.history.cases.map((entry) => {
     const skinId = entry.skin?.id ? resolveSkinId(entry.skin.id) : null
     return skinId ? { ...entry, skin: SKIN_BY_ID.get(skinId) } : entry
@@ -707,9 +769,11 @@ function loadState() {
     if (!parsed || typeof parsed !== 'object' || !parsed.users) return defaultState()
     if (!parsed.users.player) parsed.users.player = makeSeedUser('player', PLAYER_PASSWORD, 'player', 100)
     if (!parsed.users.admin) parsed.users.admin = makeSeedUser('admin', ADMIN_PASSWORD, 'admin', ADMIN_START_BALANCE)
+    if (!parsed.users.owner) parsed.users.owner = makeSeedUser('owner', OWNER_PASSWORD, 'owner', OWNER_START_BALANCE)
     Object.values(parsed.users).forEach(migrateUser)
+    if (!Array.isArray(parsed.promos)) parsed.promos = defaultPromos()
     parsed.dailyDistributed = Number(parsed.dailyDistributed) || 0
-    parsed.version = 2
+    parsed.version = 3
     return parsed
   } catch {
     return defaultState()
@@ -799,6 +863,50 @@ function ensureDay() {
   }
   if (changed) saveState()
   return today
+}
+
+function winterEventInfo(now = new Date()) {
+  const month = now.getMonth()
+  const date = now.getDate()
+  const active = month === 10 || month === 11 || (month === 0 && date <= 15)
+  const endYear = month === 0 ? now.getFullYear() : now.getFullYear() + 1
+  const endsAt = new Date(`${endYear}-01-15T23:59:59+03:00`).toISOString()
+  return {
+    id: 'winter-event',
+    name: 'Зимний ивент',
+    active,
+    depositBonusPercent: active ? 10 : 0,
+    endsAt,
+    description: 'Снежная коллекция, +10% к пополнению и зимние промокоды.',
+  }
+}
+
+function publicPromos(user) {
+  const seenAt = user.promoSeenAt ? new Date(user.promoSeenAt).getTime() : 0
+  const list = [...state.promos]
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .map((promo) => {
+      const usedCount = Array.isArray(promo.usedBy) ? promo.usedBy.length : 0
+      const remaining = Math.max(0, promo.maxUses - usedCount)
+      return {
+        id: promo.id,
+        code: promo.code,
+        amount: promo.amount,
+        maxUses: promo.maxUses,
+        usedCount,
+        remaining,
+        createdBy: promo.createdBy,
+        createdAt: promo.createdAt,
+        activated: Array.isArray(user.activatedPromos) && user.activatedPromos.includes(promo.id),
+        exhausted: remaining <= 0,
+      }
+    })
+  return {
+    list,
+    unseenCount: list.filter((promo) => new Date(promo.createdAt).getTime() > seenAt).length,
+    canCreate: user.role === 'owner' || user.role === 'admin',
+    isOwner: user.role === 'owner',
+  }
 }
 
 function hydrateInventoryItem(entry) {
@@ -1179,6 +1287,8 @@ app.post('/api/login', (req, res) => {
     catalog: [...SKINS].sort((a, b) => a.price - b.price),
     feed: liveFeed,
     online: Math.max(1, onlineCount()),
+    promos: publicPromos(user),
+    event: winterEventInfo(),
   })
 })
 
@@ -1192,6 +1302,8 @@ app.get('/api/status', auth, (req, res) => {
     catalog: [...SKINS].sort((a, b) => a.price - b.price),
     feed: liveFeed,
     online: Math.max(1, onlineCount()),
+    promos: publicPromos(req.user),
+    event: winterEventInfo(),
     serverTime: new Date().toISOString(),
   })
 })
@@ -1336,6 +1448,101 @@ app.post('/api/sell-many', auth, (req, res) => {
   })
 })
 
+/* ------------------------------------------------------------------ */
+/*  Promo codes                                                       */
+/* ------------------------------------------------------------------ */
+
+app.get('/api/promos', auth, (req, res) => {
+  res.json({ ok: true, promos: publicPromos(req.user) })
+})
+
+app.post('/api/promos/seen', auth, (req, res) => {
+  req.user.promoSeenAt = new Date().toISOString()
+  saveState()
+  res.json({ ok: true, promos: publicPromos(req.user) })
+})
+
+app.post('/api/promos', auth, (req, res) => {
+  const user = req.user
+  if (user.role !== 'owner' && user.role !== 'admin') {
+    return sendError(res, 403, 'FORBIDDEN', 'Создавать промокоды может только владелец проекта')
+  }
+
+  const amount = Math.floor(Number(req.body?.amount))
+  if (!Number.isFinite(amount) || amount <= 0 || amount > PROMO_MAX_AMOUNT) {
+    return sendError(res, 400, 'BAD_AMOUNT', `Награда должна быть от 1 до ${formatGold(PROMO_MAX_AMOUNT)}`)
+  }
+
+  const maxUses = Math.trunc(Number(req.body?.maxUses) || 100)
+  if (maxUses < 1 || maxUses > PROMO_MAX_USES) {
+    return sendError(res, 400, 'BAD_USES', `Количество активаций: от 1 до ${PROMO_MAX_USES}`)
+  }
+
+  let code = String(req.body?.code || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]/g, '')
+    .slice(0, 24)
+  if (!code) code = `WINTER-${crypto.randomBytes(2).toString('hex').toUpperCase()}`
+
+  if (state.promos.some((promo) => promo.code === code)) {
+    return sendError(res, 400, 'DUPLICATE_CODE', 'Такой промокод уже существует')
+  }
+
+  const promo = makePromo(code, amount, maxUses, user.username)
+  state.promos.unshift(promo)
+  user.promoSeenAt = new Date().toISOString()
+  saveState()
+
+  res.json({
+    ok: true,
+    promo: {
+      ...promo,
+      usedCount: 0,
+      remaining: promo.maxUses,
+      activated: false,
+      exhausted: false,
+    },
+    promos: publicPromos(user),
+    message: `Промокод ${code} создан на ${formatGold(amount)}`,
+  })
+})
+
+app.post('/api/promos/activate', auth, (req, res) => {
+  const user = req.user
+  const code = String(req.body?.code || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]/g, '')
+  if (!code) return sendError(res, 400, 'BAD_CODE', 'Введите промокод')
+
+  const promo = state.promos.find((item) => item.code === code)
+  if (!promo) return sendError(res, 404, 'PROMO_NOT_FOUND', 'Промокод не найден')
+
+  if (Array.isArray(user.activatedPromos) && user.activatedPromos.includes(promo.id)) {
+    return sendError(res, 400, 'ALREADY_USED', 'Вы уже активировали этот промокод')
+  }
+  if (!Array.isArray(promo.usedBy)) promo.usedBy = []
+  if (promo.usedBy.length >= promo.maxUses) {
+    return sendError(res, 400, 'PROMO_EXHAUSTED', 'У промокода закончились активации')
+  }
+
+  promo.usedBy.push(user.id)
+  user.activatedPromos.push(promo.id)
+  user.balance = roundGold(user.balance + promo.amount)
+  user.promoSeenAt = new Date().toISOString()
+  saveState()
+
+  res.json({
+    ok: true,
+    amount: promo.amount,
+    promo: { code: promo.code, amount: promo.amount },
+    user: publicUser(user),
+    promos: publicPromos(user),
+    message: `Промокод активирован: +${formatGold(promo.amount)}`,
+  })
+})
+
 app.post('/api/upgrade', auth, (req, res) => {
   const instanceId = String(req.body?.instanceId || '')
   const targetSkinId = String(req.body?.targetSkinId || '')
@@ -1352,25 +1559,53 @@ app.post('/api/upgrade', auth, (req, res) => {
     return sendError(res, 400, 'BAD_TARGET', 'Цель должна быть дороже исходного скина')
   }
 
-  // Дом-эдж 10%: шанс зависит только от цен на сервере, клиент не может его подменить.
-  const chance = Math.min(90, Math.max(1, roundGold((baseSkin.price / targetSkin.price) * 90)))
+  // Доплата из баланса повышает эффективную стоимость апгрейда.
+  // Шанс = (стоимость скина + доплата) / цель × 90%, но не выше 90%.
+  const maxUsefulBoost = Math.max(0, roundGold(targetSkin.price * UPGRADE_EDGE - baseSkin.price))
+  const requestedBoost = Math.max(0, Number(req.body?.boost) || 0)
+  const boost = roundGold(Math.min(requestedBoost, maxUsefulBoost))
+
+  if (boost > user.balance + 1e-9) {
+    return sendError(res, 400, 'INSUFFICIENT_FUNDS', 'Недостаточно голды для доплаты', {
+      user: publicUser(user),
+      daily: buildDaily(),
+    })
+  }
+
+  const chance = Math.min(
+    90,
+    Math.max(1, Math.round(((baseSkin.price + boost) / targetSkin.price) * 90 * 100) / 100),
+  )
   const roll = crypto.randomInt(0, 10000) / 100
   const won = roll < chance
 
   user.inventory.splice(index, 1)
+  if (boost > 0) user.balance = roundGold(user.balance - boost)
+
   let wonItem = null
+  let compensation = 0
   if (won) {
     const entry = makeInventoryEntry(targetSkin)
     user.inventory.unshift(entry)
     wonItem = { ...targetSkin, instanceId: entry.instanceId, obtainedAt: entry.obtainedAt }
     pushLiveDrop(user, targetSkin, 'upgrade')
+  } else {
+    // Утешительная компенсация: 5–10% от стоимости сгоревшего скина.
+    const rate = COMPENSATION_MIN + crypto.randomInt(0, 501) / 10000
+    compensation = roundGold(baseSkin.price * rate)
+    user.balance = roundGold(user.balance + compensation)
   }
+
   pushUpgradeHistory(user, {
     won,
     chance,
+    boost,
+    compensation,
     baseSkin: { ...baseSkin },
     targetSkin: { ...targetSkin },
-    profit: won ? roundGold(targetSkin.price - baseSkin.price) : -roundGold(baseSkin.price),
+    profit: won
+      ? roundGold(targetSkin.price - baseSkin.price - boost)
+      : -roundGold(baseSkin.price + boost - compensation),
   })
   saveState()
 
@@ -1378,13 +1613,19 @@ app.post('/api/upgrade', auth, (req, res) => {
     ok: true,
     won,
     chance,
+    boost,
+    compensation,
     roll,
     baseSkin,
     targetSkin,
     wonItem,
     user: publicUser(user),
     daily: buildDaily(),
-    message: won ? `Апгрейд успешен: ${targetSkin.name}` : 'Апгрейд не удался',
+    message: won
+      ? `Апгрейд успешен: ${targetSkin.name}`
+      : compensation > 0
+        ? `Апгрейд не удался · компенсация +${formatGold(compensation)}`
+        : 'Апгрейд не удался',
   })
 })
 
@@ -1565,15 +1806,27 @@ app.post('/api/deposit', auth, (req, res) => {
   if (!isAdmin) {
     state.dailyDistributed = roundGold(Number(state.dailyDistributed || 0) + amount)
   }
+
+  const event = winterEventInfo()
+  const bonus = !isAdmin && event.active ? roundGold(amount * (event.depositBonusPercent / 100)) : 0
+  if (bonus > 0) user.balance = roundGold(user.balance + bonus)
   saveState()
 
   res.json({
     ok: true,
     amount,
+    bonus,
+    credited: roundGold(amount + bonus),
     unlimited: isAdmin,
+    event,
     user: publicUser(user),
     daily: buildDaily(),
-    message: isAdmin ? `Admin-донат +${amount} G без лимита` : `Демо-донат +${amount} G`,
+    message:
+      bonus > 0
+        ? `Демо-донат +${amount} G · зимний бонус +${bonus} G`
+        : isAdmin
+          ? `Admin-донат +${amount} G без лимита`
+          : `Демо-донат +${amount} G`,
   })
 })
 
