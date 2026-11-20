@@ -637,6 +637,48 @@ function weightedPick(config) {
 }
 
 /*
+ * Лента кейса — только визуал: победитель уже выбран pickCaseSkinWithPity().
+ * В ленту попадает весь каталог кейса (чтобы пролетало много разных скинов),
+ * остальные слоты добиваются по весам кейса, поэтому визуальные шансы
+ * остаются близкими к реальным. Последние слоты оставлены под победителя.
+ */
+const CASE_REEL_SINGLE = 120
+const CASE_REEL_MULTI = 90
+
+function buildCaseReel(config, winner, count) {
+  const targetLength = count > 1 ? CASE_REEL_MULTI : CASE_REEL_SINGLE
+  const fillerCount = targetLength - 1
+  const deck = config.pool
+    .map(([skinId]) => SKIN_BY_ID.get(skinId))
+    .filter(Boolean)
+    .slice(0, fillerCount)
+
+  let lastId = deck.length ? deck[deck.length - 1].id : null
+  while (deck.length < fillerCount) {
+    let pick = weightedPick(config)
+    let guard = 0
+    while (pick.id === lastId && guard < 4) {
+      pick = weightedPick(config)
+      guard += 1
+    }
+    deck.push(pick)
+    lastId = pick.id
+  }
+
+  // Перемешиваем, чтобы редкие скины не шли подряд.
+  for (let i = deck.length - 1; i > 0; i -= 1) {
+    const j = crypto.randomInt(0, i + 1)
+    const swap = deck[i]
+    deck[i] = deck[j]
+    deck[j] = swap
+  }
+
+  const winnerIndex = Math.max(0, deck.length - 7)
+  deck.splice(winnerIndex, 0, { ...winner, winner: true })
+  return deck.map((skin) => ({ ...skin, reelId: crypto.randomUUID() }))
+}
+
+/*
  * «Гарант» (pity): каждый кейс помнит серию открытий без Arcane/ножа.
  * Шанс редкого дропа = естественный шанс + 1% за каждое «сухое» открытие,
  * то есть +30% к 30-му открытию и 100% на 100-м. Редкий дроп сбрасывает серию.
@@ -1359,10 +1401,7 @@ app.post('/api/open-case', auth, (req, res) => {
   const openings = []
   for (let index = 0; index < count; index += 1) {
     const { skin: winner, pity } = pickCaseSkinWithPity(user, config)
-    const reel = Array.from({ length: 40 }, (_, reelIndex) => {
-      const skin = reelIndex === 34 ? winner : weightedPick(config)
-      return { ...skin, reelId: crypto.randomUUID() }
-    })
+    const reel = buildCaseReel(config, winner, count)
     const entry = makeInventoryEntry(winner)
     user.inventory.unshift(entry)
     const publicWinner = { ...winner, instanceId: entry.instanceId, obtainedAt: entry.obtainedAt }

@@ -1503,7 +1503,7 @@ function CasesSection({ cases, onOpen, user, now }) {
               <span className="h-1 w-1 rounded-full bg-acid" />
               {cases.length} {plural(cases.length, ['кейс', 'кейса', 'кейсов'])}
             </span>
-            <span className="hidden chip sm:inline-flex">40 предметов в ленте</span>
+            <span className="hidden chip sm:inline-flex">120 предметов в ленте</span>
           </div>
         }
       />
@@ -4300,7 +4300,7 @@ function LoginScreen({ onLogin, notice }) {
 /* ------------------------------------------------------------------ */
 
 function makePreviewReel(caseData) {
-  return Array.from({ length: 40 }, (_, index) => {
+  return Array.from({ length: 120 }, (_, index) => {
     const skin = caseData.contents[(index * 5 + 2) % caseData.contents.length]
     return { ...skin, reelId: `preview-${caseData.id}-${index}` }
   })
@@ -4381,7 +4381,8 @@ function CaseModal({
       const track = trackRefs.current[index]
       const viewport = viewportRefs.current[index]
       if (!track || !viewport) return
-      const target = track.children[WINNER_INDEX]
+      const flaggedIndex = reel.findIndex((item) => item.winner)
+      const target = track.children[flaggedIndex >= 0 ? flaggedIndex : WINNER_INDEX]
       if (!target) return
 
       track.style.transition = 'none'
@@ -4529,6 +4530,7 @@ function CaseModal({
   }
 
   const compactReels = reels.length > 1
+  const winnerSpot = (reels[0] || []).findIndex((skin) => skin.winner)
   const single = results?.[0] || null
   const ctaLabel = freeLocked
     ? `Через ${formatCountdown(freeCooldownIn)}`
@@ -4693,7 +4695,7 @@ function CaseModal({
                 <div className="flex items-center gap-2">
                   <span className="live-dot h-1.5 w-1.5 rounded-full bg-acid" />
                   <span className="text-[8px] font-black uppercase tracking-[0.18em] text-white/38">
-                    Рулетка · 40 предметов
+                    Рулетка · {reels[0]?.length || 120} предметов
                   </span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -4752,7 +4754,8 @@ function CaseModal({
                           >
                             {reel.map((skin, index) => {
                               const meta = RARITY[skin.rarity] || RARITY.Common
-                              const isWinner = showResult && results && index === WINNER_INDEX
+                              const isWinner =
+                                showResult && results && (skin.winner || index === WINNER_INDEX)
                               return (
                                 <div
                                   key={skin.reelId || `${skin.id}-${index}`}
@@ -4829,7 +4832,7 @@ function CaseModal({
                         >
                           {reel.map((skin, index) => {
                             const meta = RARITY[skin.rarity] || RARITY.Common
-                            const isWinner = showResult && index === WINNER_INDEX
+                            const isWinner = showResult && (skin.winner || index === WINNER_INDEX)
                             return (
                               <div
                                 key={skin.reelId || `${skin.id}-${index}`}
@@ -4866,7 +4869,11 @@ function CaseModal({
                     <Icon name="shield" size={13} className="text-acid/55" />
                     Выигрыш определяется на сервере
                     <span className="hidden text-white/15 sm:inline">·</span>
-                    <span className="hidden sm:inline">35-й предмет в ленте — ваш</span>
+                    <span className="hidden sm:inline">
+                      {winnerSpot >= 0
+                        ? `${winnerSpot + 1}-й предмет в ленте — ваш`
+                        : 'Победитель уже определён на сервере'}
+                    </span>
                   </div>
                   <div className="flex items-center gap-2">
                     {!canAfford && !isFree && (
