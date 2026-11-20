@@ -2936,6 +2936,8 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
   const [error, setError] = useState('')
   const [boost, setBoost] = useState(0)
   const [customChance, setCustomChance] = useState('')
+  const [targetQuery, setTargetQuery] = useState('')
+  const [targetLimit, setTargetLimit] = useState(120)
   const [spin, setSpin] = useState(null)
   const needleRef = useRef(null)
   const duration = fast ? ANIM_MS_FAST : ANIM_MS_NORMAL
@@ -2948,6 +2950,21 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
     () => (base ? catalog.filter((skin) => skin.price > base.price) : []),
     [base, catalog],
   )
+  const filteredTargets = useMemo(() => {
+    const normalized = targetQuery.trim().toLowerCase()
+    if (!normalized) return higherTargets
+    return higherTargets.filter(
+      (skin) =>
+        skin.name.toLowerCase().includes(normalized) ||
+        String(skin.weapon || '').toLowerCase().includes(normalized),
+    )
+  }, [higherTargets, targetQuery])
+  const visibleTargets = filteredTargets.slice(0, targetLimit)
+
+  useEffect(() => {
+    setTargetLimit(120)
+  }, [targetQuery, baseId])
+
   const target = useMemo(
     () => higherTargets.find((skin) => skin.id === targetId) || null,
     [higherTargets, targetId],
@@ -3032,6 +3049,8 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
     setTargetId(null)
     setBoost(0)
     setCustomChance('')
+    setTargetQuery('')
+    setTargetLimit(120)
     setResult(null)
     setError('')
     resetWheel()
@@ -3618,13 +3637,31 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                 </span>
               </div>
               <span className="text-[9px] font-semibold text-white/24">
-                {higherTargets.length ? `${higherTargets.length} доступно` : 'нет целей'}
+                {higherTargets.length
+                  ? filteredTargets.length === higherTargets.length
+                    ? `${higherTargets.length} доступно`
+                    : `${filteredTargets.length} из ${higherTargets.length}`
+                  : 'нет целей'}
               </span>
+            </div>
+
+            <div className="relative mt-2.5">
+              <Icon
+                name="search"
+                size={13}
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/24"
+              />
+              <input
+                value={targetQuery}
+                onChange={(event) => setTargetQuery(event.target.value)}
+                placeholder="Найти цель по названию или оружию..."
+                className="h-9 w-full rounded-lg border border-white/[0.08] bg-black/25 pl-8 pr-3 text-[9px] font-semibold text-white placeholder:text-white/20 transition focus:border-acid/40 focus:outline-none"
+              />
             </div>
 
             {higherTargets.length ? (
               <div className="no-scrollbar mt-3 grid max-h-[480px] grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3 lg:grid-cols-2 2xl:grid-cols-3">
-                {higherTargets.map((skin) => {
+                {visibleTargets.map((skin) => {
                   const meta = RARITY[skin.rarity] || RARITY.Common
                   const selected = targetId === skin.id
                   const targetChance = base
@@ -3684,6 +3721,21 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                     </button>
                   )
                 })}
+                {!visibleTargets.length && (
+                  <div className="col-span-full rounded-xl border border-dashed border-white/10 bg-white/[0.02] px-4 py-8 text-center text-[9px] font-semibold text-white/30">
+                    Ничего не найдено. Измените запрос.
+                  </div>
+                )}
+                {filteredTargets.length > targetLimit && (
+                  <button
+                    type="button"
+                    onClick={() => setTargetLimit((value) => value + 120)}
+                    className="col-span-full flex items-center justify-center gap-2 rounded-xl border border-acid/25 bg-acid/[0.07] px-4 py-2.5 text-[8px] font-black uppercase tracking-[0.08em] text-acid transition hover:bg-acid/[0.14]"
+                  >
+                    <Icon name="plus" size={12} />
+                    Показать ещё 120 целей
+                  </button>
+                )}
               </div>
             ) : (
               <div className="mt-3 flex h-[220px] flex-col items-center justify-center rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-6 text-center">
@@ -4190,8 +4242,8 @@ function LoginScreen({ onLogin, notice }) {
           <div className="mt-8 grid max-w-[570px] grid-cols-3 gap-2">
             {[
               ['15K', 'дневной лимит', 'gift'],
-              ['16', 'кейсов', 'box'],
-              ['360+', 'скинов', 'coin'],
+              ['23', 'кейса', 'box'],
+              ['1500+', 'предметов', 'coin'],
             ].map(([value, label, icon]) => (
               <div key={label} className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-3.5">
                 <div className="flex items-center justify-between">
@@ -5206,6 +5258,7 @@ function StoreModal({ catalog, balance, token, onClose, onUpdate, onToast }) {
   const [filter, setFilter] = useState('all')
   const [query, setQuery] = useState('')
   const [buying, setBuying] = useState(null)
+  const [visibleCount, setVisibleCount] = useState(80)
 
   const close = useCallback(() => onClose(), [onClose])
   useEscape(close)
@@ -5217,6 +5270,12 @@ function StoreModal({ catalog, balance, token, onClose, onUpdate, onToast }) {
       .filter((skin) => !normalized || skin.name.toLowerCase().includes(normalized) || skin.weapon.toLowerCase().includes(normalized))
       .sort((a, b) => b.price - a.price)
   }, [catalog, filter, query])
+
+  useEffect(() => {
+    setVisibleCount(80)
+  }, [filter, query])
+
+  const visibleItems = items.slice(0, visibleCount)
 
   async function buy(skin) {
     if (buying) return
@@ -5285,7 +5344,7 @@ function StoreModal({ catalog, balance, token, onClose, onUpdate, onToast }) {
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Поиск скина или оружия..."
+                placeholder="Поиск предмета или оружия..."
                 className="h-10 w-full rounded-xl border border-white/[0.08] bg-black/25 pl-9 pr-3 text-[11px] font-semibold text-white placeholder:text-white/20 transition focus:border-acid/40 focus:outline-none"
               />
             </div>
@@ -5330,7 +5389,7 @@ function StoreModal({ catalog, balance, token, onClose, onUpdate, onToast }) {
 
           {items.length ? (
             <div className="mt-5 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {items.map((skin) => {
+              {visibleItems.map((skin) => {
                 const meta = RARITY[skin.rarity] || RARITY.Common
                 const isBuying = buying === skin.id
                 const affordable = balance + 1e-9 >= skin.price
@@ -5380,6 +5439,22 @@ function StoreModal({ catalog, balance, token, onClose, onUpdate, onToast }) {
               <Icon name="search" size={30} className="text-white/15" />
               <div className="mt-3 text-[12px] font-bold text-white/42">Ничего не найдено</div>
               <div className="mt-1 text-[9px] text-white/22">Измените запрос или фильтр редкости.</div>
+            </div>
+          )}
+
+          {items.length > visibleCount && (
+            <div className="mt-4 flex flex-col items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setVisibleCount((value) => value + 80)}
+                className="flex items-center gap-2 rounded-xl border border-acid/25 bg-acid/[0.07] px-5 py-2.5 text-[9px] font-black uppercase tracking-[0.08em] text-acid transition hover:bg-acid/[0.14]"
+              >
+                <Icon name="plus" size={13} />
+                Показать ещё 80
+              </button>
+              <span className="text-[8px] font-semibold text-white/22">
+                Показано {Math.min(visibleCount, items.length)} из {items.length}
+              </span>
             </div>
           )}
         </div>

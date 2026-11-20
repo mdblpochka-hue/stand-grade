@@ -30,6 +30,13 @@ const SELECTED_CASES = [
   'frostfire',
   'gloves',
   'blade',
+  'obsidian',
+  'millionaire',
+  'ruby',
+  'emerald',
+  'brilliant',
+  'nameless',
+  'all-in',
 ]
 
 const ACCENTS = [
@@ -61,9 +68,36 @@ const NON_WEAPON = new Set([
   'Graffiti',
 ])
 
-function isWeaponSkin(skin) {
-  if (!skin || !skin.weapon || NON_WEAPON.has(skin.weapon)) return false
+const WEAPON_TYPES = new Set([
+  'AWM', 'AKR', 'AKR12', 'M4', 'M4A1', 'G22', 'USP', 'Desert Eagle', 'P90', 'P350',
+  'UMP45', 'MP7', 'MP5', 'MAC10', 'TEC-9', 'M16', 'M40', 'M60', 'M110', 'FAMAS',
+  'FN FAL', 'SM1014', 'SPAS', 'Berettas', 'Akimbo Uzi', 'VAL', 'Mallard', 'Karambit',
+  'M9 Bayonet', 'Butterfly', 'Flip', 'Kunai', 'Mantis', 'Sting', 'Dual Daggers',
+  'Kukri', 'Tanto', 'Fang', 'Stiletto', 'Gloves', 'F/S', 'Flash', 'Molotov', 'Smoke',
+  'HE', 'Thermite',
+])
+
+// В API встречаются перевёрнутые поля (weapon:"Twilight", name:"Butterfly").
+function orientSkin(skin) {
+  const weapon = String(skin.weapon || '').trim()
+  const name = String(skin.name || '').trim()
+  const swapped = WEAPON_TYPES.has(name) && !WEAPON_TYPES.has(weapon)
+  const resultWeapon = swapped ? name : weapon
+  return {
+    weapon: resultWeapon === 'M9' ? 'M9 Bayonet' : resultWeapon,
+    name: swapped ? weapon : name,
+  }
+}
+
+function isValidItem(skin) {
+  if (!skin || !skin.name) return false
   if (!Number.isFinite(Number(skin.price)) || Number(skin.price) <= 0) return false
+  return Boolean(skin.image || skin.imageUrlWebp)
+}
+
+function isWeaponItem(skin) {
+  if (!isValidItem(skin)) return false
+  if (!skin.weapon || NON_WEAPON.has(skin.weapon)) return false
   if (/^(Case|Sticker|Charm|Gift|Fragment|Agent|Graffiti|Pack)\b/i.test(skin.name || '')) {
     return false
   }
@@ -71,9 +105,11 @@ function isWeaponSkin(skin) {
 }
 
 function displayName(skin) {
-  const weapon = String(skin.weapon || '').trim()
-  const name = String(skin.name || '').trim()
-  const base = name.toLowerCase().startsWith(weapon.toLowerCase() + ' ') ? name : `${weapon} ${name}`
+  const oriented = orientSkin(skin)
+  const base =
+    oriented.name.toLowerCase().startsWith(oriented.weapon.toLowerCase() + ' ')
+      ? oriented.name
+      : `${oriented.weapon} ${oriented.name}`
   return `${base}${skin.isStatTrak ? ' (StatTrack)' : ''}`.replace(/\s+/g, ' ').trim()
 }
 
@@ -122,7 +158,7 @@ async function main() {
     }
 
     const items = (box.items || [])
-      .filter((item) => Number(item.chance) > 0 && isWeaponSkin(item.skin))
+      .filter((item) => Number(item.chance) > 0 && isValidItem(item.skin))
       .map((item) => ({
         skinId: item.skinId,
         chance: Number(item.chance),
@@ -131,7 +167,7 @@ async function main() {
 
     const chanceSum = items.reduce((sum, item) => sum + item.chance, 0)
     if (items.length < 2 || chanceSum <= 0) {
-      console.warn(`  ! case ${slug} skipped: too few weapon items`)
+      console.warn(`  ! case ${slug} skipped: too few items`)
       continue
     }
 
@@ -149,29 +185,39 @@ async function main() {
       previewImage: box.previewPath || '',
       items: normalized,
     })
-    console.log(`  + ${slug}: ${normalized.length} weapon items, ${chanceSum.toFixed(1)}% kept`)
+    console.log(`  + ${slug}: ${normalized.length} items, ${chanceSum.toFixed(1)}% kept`)
   }
 
-  const usedIds = new Set()
+  const caseItemIds = new Set()
   for (const box of selected) {
-    for (const item of box.items) usedIds.add(item.skinId)
+    for (const item of box.items) caseItemIds.add(item.skinId)
   }
 
+  // Каталог: все оружейные скины, все предметы из выбранных кейсов,
+  // а также дорогие стикеры/брелоки/агенты/кейсы и прочие коллекционные вещи.
   const catalog = rawSkins
-    .filter((skin) => usedIds.has(skin.id) && isWeaponSkin(skin))
-    .map((skin) => ({
-      id: skin.id,
-      name: displayName(skin),
-      baseName: skin.name,
-      weapon: skin.weapon,
-      rarity: skin.rarity,
-      price: Number(skin.price),
-      image: skin.imageUrlWebp || skin.image,
-      imagePng: skin.image,
-      isStatTrak: Boolean(skin.isStatTrak),
-      isSouvenir: Boolean(skin.isSouvenir),
-      collection: 'Standoff 2',
-    }))
+    .filter((skin) => {
+      if (!isValidItem(skin)) return false
+      if (caseItemIds.has(skin.id)) return true
+      if (isWeaponItem(skin)) return true
+      return Number(skin.price) >= 1000
+    })
+    .map((skin) => {
+      const oriented = orientSkin(skin)
+      return {
+        id: skin.id,
+        name: displayName(skin),
+        baseName: oriented.name,
+        weapon: oriented.weapon,
+        rarity: skin.rarity,
+        price: Number(skin.price),
+        image: skin.imageUrlWebp || skin.image,
+        imagePng: skin.image,
+        isStatTrak: Boolean(skin.isStatTrak),
+        isSouvenir: Boolean(skin.isSouvenir),
+        collection: 'Standoff 2',
+      }
+    })
     .sort((a, b) => a.price - b.price)
 
   const catalogById = new Map(catalog.map((skin) => [skin.id, skin]))
