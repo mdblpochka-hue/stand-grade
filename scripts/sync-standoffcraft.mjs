@@ -43,6 +43,11 @@ function isValidItem(skin) {
   return Boolean(skin.image || skin.imageUrlWebp)
 }
 
+function isAgentItem(skin) {
+  if (!skin) return false
+  return /^Agent\b/i.test(String(skin.weapon || '')) || /^Agent\b/i.test(String(skin.name || ''))
+}
+
 function isWeaponItem(skin) {
   if (!isValidItem(skin)) return false
   if (!skin.weapon || NON_WEAPON.has(skin.weapon)) return false
@@ -107,7 +112,12 @@ async function main() {
   // Каталог: все оружейные скины + дорогие не-скины (стикеры, брелоки,
   // агенты, кейсы и т.п.). Кейсы STAND GRADE собираются отдельно.
   const catalog = rawSkins
-    .filter((skin) => isValidItem(skin) && (isWeaponItem(skin) || Number(skin.price) >= 1000))
+    .filter(
+      (skin) =>
+        isValidItem(skin) &&
+        !isAgentItem(skin) &&
+        (isWeaponItem(skin) || Number(skin.price) >= 1000),
+    )
     .map((skin) => {
       const oriented = orientSkin(skin)
       return {

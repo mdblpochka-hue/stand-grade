@@ -4244,7 +4244,7 @@ function LoginScreen({ onLogin, notice }) {
             {[
               ['15K', 'дневной лимит', 'gift'],
               ['15', 'кейсов', 'box'],
-              ['1500+', 'предметов', 'coin'],
+              ['1400+', 'предметов', 'coin'],
             ].map(([value, label, icon]) => (
               <div key={label} className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-3.5">
                 <div className="flex items-center justify-between">
