@@ -4188,6 +4188,24 @@ function BootScreen() {
 /*  Login                                                              */
 /* ------------------------------------------------------------------ */
 
+const LOGIN_CRATE_SKIN = {
+  id: 'login-karambit-gold',
+  name: 'Karambit Gold',
+  weapon: 'Karambit',
+  rarity: 'Nameless',
+  price: 147994,
+  image: 'https://skin.standoffcraft.com/items/Karambit%20Gold.webp',
+}
+
+const LOGIN_FEATURED_SKIN = {
+  id: 'login-year-of-the-tiger',
+  name: 'M4A1 Year Of The Tiger',
+  weapon: 'M4A1',
+  rarity: 'Arcane',
+  price: 199999,
+  image: 'https://skin.standoffcraft.com/items/M4A1%20Year%20Of%20The%20Tiger.webp',
+}
+
 function LoginScreen({ onLogin, notice }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -4259,17 +4277,21 @@ function LoginScreen({ onLogin, notice }) {
 
           <div className="mt-9 flex max-w-[600px] items-end gap-3">
             <div className="relative flex flex-1 items-center justify-center rounded-[24px] border border-white/[0.07] bg-[radial-gradient(circle_at_50%_60%,rgba(53,255,135,.09),transparent_65%)] py-4">
-              <CaseCrate accent="#35ff87" skin={{ id: 'karambit-gold', name: 'Karambit Gold', weapon: 'Karambit', rarity: 'Nameless', price: 142000 }} className="h-40 w-full" />
+              <CaseCrate accent="#35ff87" skin={LOGIN_CRATE_SKIN} className="h-40 w-full" />
             </div>
             <div className="w-[190px] overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0c130e]">
-              <SkinVisual
-                skin={{ id: 'm4-samurai', name: 'M4 Samurai', weapon: 'M4', rarity: 'Legendary', price: 1050 }}
-                className="h-24 w-full"
-              />
+              <SkinVisual skin={LOGIN_FEATURED_SKIN} className="h-24 w-full" />
               <div className="p-3">
-                <div className="text-[8px] font-black uppercase tracking-[0.14em] text-[#ffc857]">Legendary</div>
-                <div className="mt-1 text-[10px] font-extrabold text-white/82">M4 Samurai</div>
-                <div className="mt-1 text-[9px] font-bold tabular-nums text-white/35">1 050 G</div>
+                <div
+                  className="text-[8px] font-black uppercase tracking-[0.14em]"
+                  style={{ color: RARITY[LOGIN_FEATURED_SKIN.rarity].color }}
+                >
+                  {RARITY[LOGIN_FEATURED_SKIN.rarity].label}
+                </div>
+                <div className="mt-1 text-[10px] font-extrabold text-white/82">{LOGIN_FEATURED_SKIN.name}</div>
+                <div className="mt-1 text-[9px] font-bold tabular-nums text-white/35">
+                  {formatPrice(LOGIN_FEATURED_SKIN.price)}
+                </div>
               </div>
             </div>
           </div>
