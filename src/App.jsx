@@ -3428,7 +3428,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
               </div>
 
               {inventory.length ? (
-                <div className="no-scrollbar mt-3 flex gap-2 overflow-x-auto pb-1">
+                <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-5 2xl:grid-cols-6">
                   {inventory.map((item) => {
                     const meta = RARITY[item.rarity] || RARITY.Common
                     const selected = baseIds.includes(item.instanceId)
@@ -3440,7 +3440,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                         onClick={() => chooseBase(item)}
                         disabled={upgrading}
                         className={cx(
-                          'relative w-[96px] shrink-0 overflow-hidden rounded-xl border text-left transition sm:w-[108px] disabled:cursor-not-allowed disabled:opacity-60',
+                          'relative w-full overflow-hidden rounded-xl border text-left transition disabled:cursor-not-allowed disabled:opacity-60',
                           selected
                             ? 'border-acid/55 bg-acid/[0.07] shadow-[0_0_26px_rgba(53,255,135,.14)]'
                             : 'border-white/[0.07] bg-white/[0.025] hover:border-white/20 hover:bg-white/[0.04]',
