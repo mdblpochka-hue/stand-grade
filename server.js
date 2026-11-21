@@ -30,6 +30,7 @@ const COMPENSATION_MIN = 0.05
 const COMPENSATION_MAX = 0.1
 const PROMO_MAX_AMOUNT = 1000000
 const PROMO_MAX_USES = 100000
+const PROMO_MAX_PERCENT = 100
 const DAILY_LIMIT = 15000
 const MAX_DEPOSIT = 10000000
 const FREE_CASE_COOLDOWN_MS = 24 * 60 * 60 * 1000
@@ -849,15 +850,22 @@ function makeSeedUser(username, password, role, balance) {
     history: emptyHistory(),
     activatedPromos: [],
     promoSeenAt: null,
+    depositBoost: null,
     createdAt: new Date().toISOString(),
   }
 }
 
-function makePromo(code, amount, maxUses, createdBy = 'system') {
+function makePromo(
+  code,
+  { amount = 0, percent = 0, maxUses, createdBy = 'system', type = 'gold' } = {},
+) {
+  const promoType = type === 'deposit_percent' ? 'deposit_percent' : 'gold'
   return {
     id: crypto.randomUUID(),
     code,
-    amount: roundGold(amount),
+    type: promoType,
+    amount: promoType === 'gold' ? roundGold(amount) : 0,
+    percent: promoType === 'deposit_percent' ? Math.max(1, Math.min(100, Math.trunc(percent))) : 0,
     maxUses: Math.max(1, Math.trunc(maxUses)),
     usedBy: [],
     createdBy,
@@ -866,7 +874,7 @@ function makePromo(code, amount, maxUses, createdBy = 'system') {
 }
 
 function defaultPromos() {
-  return [makePromo('WINTER2026', 250, 500, 'winter-event')]
+  return [makePromo('WINTER2026', { amount: 250, maxUses: 500, createdBy: 'winter-event' })]
 }
 
 function defaultState() {
@@ -900,6 +908,7 @@ function migrateUser(user) {
   if (!user.lastFreeCaseAt) user.lastFreeCaseAt = null
   if (!Array.isArray(user.activatedPromos)) user.activatedPromos = []
   if (!user.promoSeenAt) user.promoSeenAt = null
+  if (!user.depositBoost || typeof user.depositBoost !== 'object') user.depositBoost = null
   user.history.cases = user.history.cases.map((entry) => {
     const skinId = entry.skin?.id ? resolveSkinId(entry.skin.id) : null
     return skinId ? { ...entry, skin: SKIN_BY_ID.get(skinId) } : entry
@@ -1035,7 +1044,9 @@ function publicPromos(user) {
       return {
         id: promo.id,
         code: promo.code,
-        amount: promo.amount,
+        type: promo.type || 'gold',
+        amount: promo.type === 'deposit_percent' ? 0 : promo.amount,
+        percent: promo.type === 'deposit_percent' ? promo.percent : 0,
         maxUses: promo.maxUses,
         usedCount,
         remaining,
@@ -1104,6 +1115,7 @@ function publicUser(user) {
     nextFreeCaseAt: isAdmin ? null : nextFreeCaseAt,
     unlimitedFreeCase: isAdmin,
     dailyLimit: daily,
+    depositBoost: user.depositBoost || null,
     createdAt: user.createdAt,
     serverTime: new Date().toISOString(),
   }
@@ -1611,9 +1623,20 @@ app.post('/api/promos', auth, (req, res) => {
     return sendError(res, 403, 'FORBIDDEN', 'Создавать промокоды может только владелец проекта')
   }
 
-  const amount = Math.floor(Number(req.body?.amount))
-  if (!Number.isFinite(amount) || amount <= 0 || amount > PROMO_MAX_AMOUNT) {
-    return sendError(res, 400, 'BAD_AMOUNT', `Награда должна быть от 1 до ${formatGold(PROMO_MAX_AMOUNT)}`)
+  const type = req.body?.type === 'deposit_percent' ? 'deposit_percent' : 'gold'
+  let amount = 0
+  let percent = 0
+
+  if (type === 'gold') {
+    amount = Math.floor(Number(req.body?.amount))
+    if (!Number.isFinite(amount) || amount <= 0 || amount > PROMO_MAX_AMOUNT) {
+      return sendError(res, 400, 'BAD_AMOUNT', `Награда должна быть от 1 до ${formatGold(PROMO_MAX_AMOUNT)}`)
+    }
+  } else {
+    percent = Math.trunc(Number(req.body?.percent))
+    if (!Number.isFinite(percent) || percent < 1 || percent > PROMO_MAX_PERCENT) {
+      return sendError(res, 400, 'BAD_PERCENT', `Процент должен быть от 1 до ${PROMO_MAX_PERCENT}`)
+    }
   }
 
   const maxUses = Math.trunc(Number(req.body?.maxUses) || 100)
@@ -1626,13 +1649,22 @@ app.post('/api/promos', auth, (req, res) => {
     .toUpperCase()
     .replace(/[^A-Z0-9_-]/g, '')
     .slice(0, 24)
-  if (!code) code = `WINTER-${crypto.randomBytes(2).toString('hex').toUpperCase()}`
+  if (!code) {
+    const prefix = type === 'deposit_percent' ? 'BOOST' : 'WINTER'
+    code = `${prefix}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`
+  }
 
   if (state.promos.some((promo) => promo.code === code)) {
     return sendError(res, 400, 'DUPLICATE_CODE', 'Такой промокод уже существует')
   }
 
-  const promo = makePromo(code, amount, maxUses, user.username)
+  const promo = makePromo(code, {
+    type,
+    amount,
+    percent,
+    maxUses,
+    createdBy: user.username,
+  })
   state.promos.unshift(promo)
   user.promoSeenAt = new Date().toISOString()
   saveState()
@@ -1647,7 +1679,10 @@ app.post('/api/promos', auth, (req, res) => {
       exhausted: false,
     },
     promos: publicPromos(user),
-    message: `Промокод ${code} создан на ${formatGold(amount)}`,
+    message:
+      type === 'deposit_percent'
+        ? `Промокод ${code} создан: +${percent}% к пополнению`
+        : `Промокод ${code} создан на ${formatGold(amount)}`,
   })
 })
 
@@ -1670,19 +1705,46 @@ app.post('/api/promos/activate', auth, (req, res) => {
     return sendError(res, 400, 'PROMO_EXHAUSTED', 'У промокода закончились активации')
   }
 
+  const type = promo.type === 'deposit_percent' ? 'deposit_percent' : 'gold'
+  let message = ''
+  let appliedPercent = 0
+
+  if (type === 'deposit_percent') {
+    const percent = Math.max(1, Math.min(PROMO_MAX_PERCENT, Math.trunc(Number(promo.percent) || 0)))
+    const currentPercent = Math.max(0, Number(user.depositBoost?.percent) || 0)
+    // Один активный бонус к следующему пополнению: оставляем максимальный процент.
+    if (percent > currentPercent) {
+      user.depositBoost = {
+        percent,
+        promoId: promo.id,
+        code: promo.code,
+        activatedAt: new Date().toISOString(),
+      }
+    }
+    appliedPercent = Math.max(currentPercent, percent)
+    message =
+      percent >= currentPercent
+        ? `Промокод активирован: +${percent}% к следующему пополнению`
+        : `Промокод активирован. Уже действует +${appliedPercent}% к пополнению`
+  } else {
+    user.balance = roundGold(user.balance + promo.amount)
+    message = `Промокод активирован: +${formatGold(promo.amount)}`
+  }
+
   promo.usedBy.push(user.id)
   user.activatedPromos.push(promo.id)
-  user.balance = roundGold(user.balance + promo.amount)
   user.promoSeenAt = new Date().toISOString()
   saveState()
 
   res.json({
     ok: true,
-    amount: promo.amount,
-    promo: { code: promo.code, amount: promo.amount },
+    amount: type === 'gold' ? promo.amount : 0,
+    percent: type === 'deposit_percent' ? promo.percent : 0,
+    appliedPercent,
+    promo: { code: promo.code, type, amount: promo.amount, percent: promo.percent },
     user: publicUser(user),
     promos: publicPromos(user),
-    message: `Промокод активирован: +${formatGold(promo.amount)}`,
+    message,
   })
 })
 
@@ -1952,16 +2014,26 @@ app.post('/api/deposit', auth, (req, res) => {
   }
 
   const event = winterEventInfo()
-  const bonus = user.role === 'player' && event.active
-    ? roundGold(amount * (event.depositBonusPercent / 100))
-    : 0
+  const eventPercent = user.role === 'player' && event.active ? event.depositBonusPercent : 0
+  const promoPercent = Math.max(0, Number(user.depositBoost?.percent) || 0)
+  const eventBonus = roundGold(amount * (eventPercent / 100))
+  const promoBonus = roundGold(amount * (promoPercent / 100))
+  const bonus = roundGold(eventBonus + promoBonus)
   if (bonus > 0) user.balance = roundGold(user.balance + bonus)
+  if (promoPercent > 0) user.depositBoost = null
   saveState()
+
+  const bonusParts = []
+  if (eventBonus > 0) bonusParts.push(`зимний бонус +${eventBonus} G`)
+  if (promoBonus > 0) bonusParts.push(`промокод +${promoBonus} G`)
 
   res.json({
     ok: true,
     amount,
     bonus,
+    eventBonus,
+    promoBonus,
+    promoPercent,
     credited: roundGold(amount + bonus),
     unlimited,
     event,
@@ -1969,7 +2041,7 @@ app.post('/api/deposit', auth, (req, res) => {
     daily: buildDaily(),
     message:
       bonus > 0
-        ? `Демо-донат +${amount} G · зимний бонус +${bonus} G`
+        ? `Демо-донат +${amount} G · ${bonusParts.join(' · ')}`
         : unlimited
           ? `Пополнение +${amount} G без лимита`
           : `Демо-донат +${amount} G`,

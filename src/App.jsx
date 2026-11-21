@@ -2667,7 +2667,9 @@ function PromoSection({ promos, user, token, event, onUpdate, onToast }) {
   const [code, setCode] = useState('')
   const [activating, setActivating] = useState(false)
   const [newCode, setNewCode] = useState('')
+  const [promoType, setPromoType] = useState('gold')
   const [amount, setAmount] = useState('250')
+  const [percent, setPercent] = useState('10')
   const [maxUses, setMaxUses] = useState('100')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
@@ -2712,7 +2714,9 @@ function PromoSection({ promos, user, token, event, onUpdate, onToast }) {
         token,
         body: {
           code: newCode.trim() || undefined,
+          type: promoType,
           amount: Number(amount) || 0,
+          percent: Number(percent) || 0,
           maxUses: Number(maxUses) || 0,
         },
       })
@@ -2741,7 +2745,7 @@ function PromoSection({ promos, user, token, event, onUpdate, onToast }) {
       <SectionHeading
         eyebrow="PROMO CODES"
         title="Промокоды и зимний ивент"
-        description="Активируй промокод и забери голду. Когда владелец добавляет новый код, у вкладки «Промокоды» загорается восклицательный знак."
+        description="Активируй промокод и забери голду или процент к следующему пополнению. Когда владелец добавляет новый код, у вкладки «Промокоды» загорается восклицательный знак."
       />
 
       {unseen > 0 && (
@@ -2771,7 +2775,9 @@ function PromoSection({ promos, user, token, event, onUpdate, onToast }) {
             </span>
             <div>
               <div className="text-[10px] font-black uppercase tracking-[0.14em] text-white/70">Активация</div>
-              <div className="text-[8px] font-semibold text-white/30">Один промокод — один раз на аккаунт</div>
+              <div className="text-[8px] font-semibold text-white/30">
+                Один промокод — один раз на аккаунт · голда или % к пополнению
+              </div>
             </div>
           </div>
 
@@ -2810,6 +2816,22 @@ function PromoSection({ promos, user, token, event, onUpdate, onToast }) {
               </div>
             </div>
           )}
+
+          {Number(user?.depositBoost?.percent) > 0 && (
+            <div className="relative mt-3 flex items-center gap-3 rounded-xl border border-[#ffcf4d]/25 bg-[#ffcf4d]/[0.07] p-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#ffcf4d]/12 text-[#ffe6a3]">
+                <Icon name="ticket" size={18} />
+              </span>
+              <div className="min-w-0">
+                <div className="text-[9px] font-black uppercase tracking-[0.12em] text-[#ffe6a3]">
+                  Активен +{user.depositBoost.percent}% к следующему пополнению
+                </div>
+                <div className="mt-0.5 text-[8px] font-semibold text-[#ffcf4d]/55">
+                  Промокод {user.depositBoost.code} · сгорит после первого пополнения
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="relative overflow-hidden rounded-[22px] border border-white/[0.08] bg-[linear-gradient(155deg,#14110b,#0a0d09)] p-4 sm:p-5">
@@ -2830,24 +2852,52 @@ function PromoSection({ promos, user, token, event, onUpdate, onToast }) {
 
           {promos?.canCreate && (
             <form onSubmit={createPromo} className="relative mt-3 space-y-2">
+              <div className="grid grid-cols-2 gap-2 rounded-xl border border-white/[0.06] bg-black/20 p-1">
+                {[
+                  ['gold', 'Голда'],
+                  ['deposit_percent', '% к пополнению'],
+                ].map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setPromoType(value)}
+                    className={cx(
+                      'rounded-lg px-2 py-1.5 text-[8px] font-black uppercase tracking-[0.08em] transition',
+                      promoType === value
+                        ? 'bg-[#ffcf4d] text-[#241a00]'
+                        : 'text-white/35 hover:bg-white/[0.05] hover:text-white/65',
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
               <div className="grid grid-cols-2 gap-2">
                 <label className="block">
                   <span className="mb-1 block text-[7px] font-black uppercase tracking-[0.12em] text-white/28">Код (пусто = авто)</span>
                   <input
                     value={newCode}
                     onChange={(event_) => setNewCode(event_.target.value.toUpperCase())}
-                    placeholder="WINTER2026"
+                    placeholder={promoType === 'deposit_percent' ? 'BOOST10' : 'WINTER2026'}
                     maxLength={24}
                     className="h-9 w-full rounded-lg border border-white/[0.09] bg-black/30 px-2.5 text-[10px] font-bold uppercase tracking-[0.06em] text-white placeholder:text-white/20 focus:border-[#ffcf4d]/40 focus:outline-none"
                   />
                 </label>
                 <label className="block">
-                  <span className="mb-1 block text-[7px] font-black uppercase tracking-[0.12em] text-white/28">Награда, G</span>
+                  <span className="mb-1 block text-[7px] font-black uppercase tracking-[0.12em] text-white/28">
+                    {promoType === 'deposit_percent' ? 'Процент, %' : 'Награда, G'}
+                  </span>
                   <input
-                    value={amount}
-                    onChange={(event_) => setAmount(event_.target.value.replace(/[^0-9]/g, ''))}
+                    value={promoType === 'deposit_percent' ? percent : amount}
+                    onChange={(event_) => {
+                      const value = event_.target.value.replace(/[^0-9]/g, '').slice(0, promoType === 'deposit_percent' ? 3 : 7)
+                      if (promoType === 'deposit_percent') setPercent(value)
+                      else setAmount(value)
+                    }}
                     inputMode="numeric"
-                    className="h-9 w-full rounded-lg border border-white/[0.09] bg-black/30 px-2.5 text-[10px] font-bold tabular-nums text-white focus:border-[#ffcf4d]/40 focus:outline-none"
+                    placeholder={promoType === 'deposit_percent' ? '10' : '250'}
+                    className="h-9 w-full rounded-lg border border-white/[0.09] bg-black/30 px-2.5 text-[10px] font-bold tabular-nums text-white placeholder:text-white/20 focus:border-[#ffcf4d]/40 focus:outline-none"
                   />
                 </label>
               </div>
@@ -2893,9 +2943,15 @@ function PromoSection({ promos, user, token, event, onUpdate, onToast }) {
                 >
                   {promo.code}
                 </button>
-                <span className="rounded-md border border-acid/20 bg-acid/[0.06] px-2 py-1 text-[9px] font-extrabold tabular-nums text-acid">
-                  +{formatPrice(promo.amount)}
-                </span>
+                {promo.type === 'deposit_percent' ? (
+                  <span className="rounded-md border border-[#9fdcff]/25 bg-[#9fdcff]/[0.07] px-2 py-1 text-[9px] font-extrabold tabular-nums text-[#cbefff]">
+                    +{promo.percent}% к пополнению
+                  </span>
+                ) : (
+                  <span className="rounded-md border border-acid/20 bg-acid/[0.06] px-2 py-1 text-[9px] font-extrabold tabular-nums text-acid">
+                    +{formatPrice(promo.amount)}
+                  </span>
+                )}
                 <span className="text-[8px] font-semibold text-white/28">
                   осталось {promo.remaining} из {promo.maxUses}
                   {promo.createdBy ? ` · ${promo.createdBy === 'system' || promo.createdBy === 'winter-event' ? 'система' : promo.createdBy}` : ''}
@@ -5510,10 +5566,12 @@ function DonateModal({ balance, token, user, daily, event, onClose, onUpdate, on
   const remaining = unlimited ? Infinity : Math.max(0, Number(daily?.remaining) || 0)
   const limit = Number(daily?.limit) || 15000
   const amount = Math.max(0, Math.floor(Number(amountInput) || 0))
-  const bonus =
-    user?.role === 'player' && event?.active
-      ? Math.round(amount * ((Number(event.depositBonusPercent) || 0) / 100) * 100) / 100
-      : 0
+  const eventPercent =
+    user?.role === 'player' && event?.active ? Number(event.depositBonusPercent) || 0 : 0
+  const promoPercent = Math.max(0, Number(user?.depositBoost?.percent) || 0)
+  const eventBonus = Math.round(amount * (eventPercent / 100) * 100) / 100
+  const promoBonus = Math.round(amount * (promoPercent / 100) * 100) / 100
+  const bonus = Math.round((eventBonus + promoBonus) * 100) / 100
   const exceeds = !unlimited && amount > remaining + 1e-9
   const close = useCallback(() => onClose(), [onClose])
   useEscape(close)
@@ -5672,15 +5730,35 @@ function DonateModal({ balance, token, user, daily, event, onClose, onUpdate, on
             )}
           </label>
 
-          {bonus > 0 && amount > 0 && (
+          {eventPercent > 0 && amount > 0 && (
             <div className="mt-2.5 flex items-center justify-between gap-2 rounded-xl border border-[#9fdcff]/20 bg-[#9fdcff]/[0.06] px-3 py-2">
               <span className="flex items-center gap-1.5 text-[8px] font-bold text-[#d8f4ff]">
                 <Icon name="snowflake" size={12} className="text-[#bfe9ff]" />
-                Зимний бонус +{event.depositBonusPercent}%
+                Зимний бонус +{eventPercent}%
               </span>
               <span className="text-[9px] font-black tabular-nums text-[#d8f4ff]">
-                +{formatGold(bonus, false)} · итого {formatGold(amount + bonus, false)}
+                +{formatGold(eventBonus, false)}
               </span>
+            </div>
+          )}
+
+          {promoPercent > 0 && amount > 0 && (
+            <div className="mt-2.5 flex items-center justify-between gap-2 rounded-xl border border-[#ffcf4d]/25 bg-[#ffcf4d]/[0.07] px-3 py-2">
+              <span className="flex min-w-0 items-center gap-1.5 text-[8px] font-bold text-[#ffe6a3]">
+                <Icon name="ticket" size={12} className="shrink-0 text-[#ffcf4d]" />
+                <span className="truncate">
+                  Промокод +{promoPercent}%{user?.depositBoost?.code ? ` · ${user.depositBoost.code}` : ''}
+                </span>
+              </span>
+              <span className="shrink-0 text-[9px] font-black tabular-nums text-[#ffe6a3]">
+                +{formatGold(promoBonus, false)}
+              </span>
+            </div>
+          )}
+
+          {bonus > 0 && amount > 0 && (
+            <div className="mt-1.5 text-right text-[8px] font-bold tabular-nums text-white/35">
+              Итого к зачислению: {formatGold(amount + bonus, false)}
             </div>
           )}
 
