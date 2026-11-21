@@ -4238,13 +4238,12 @@ function LoginScreen({ onLogin, notice }) {
             <span className="block text-white/22">Твой GRADE.</span>
           </h1>
           <p className="mt-6 max-w-lg text-[13px] leading-relaxed text-white/39">
-            Кейсы Standoff 2, дневной лимит пополнения 15 000 G, апгрейд, магазин и полноценный инвентарь. Всё в
-            одном неоново-зелёном демо-проекте.
+            Кейсы Standoff 2, апгрейд, магазин и полноценный инвентарь. Всё в одном неоново-зелёном
+            демо-проекте.
           </p>
 
-          <div className="mt-8 grid max-w-[570px] grid-cols-3 gap-2">
+          <div className="mt-8 grid max-w-[380px] grid-cols-2 gap-2">
             {[
-              ['15K', 'дневной лимит', 'gift'],
               ['15', 'кейсов', 'box'],
               ['1400+', 'предметов', 'coin'],
             ].map(([value, label, icon]) => (
