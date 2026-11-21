@@ -4081,6 +4081,8 @@ function InventorySection({ user, onSell, onSellMany, onWithdraw }) {
   const [sellingId, setSellingId] = useState(null)
   const [sellingAll, setSellingAll] = useState(false)
   const [confirmSellAll, setConfirmSellAll] = useState(false)
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState([])
 
   const items = useMemo(() => {
     const min = minPrice ? Number(minPrice) : 0
@@ -4101,6 +4103,40 @@ function InventorySection({ user, onSell, onSellMany, onWithdraw }) {
   }, [user.inventory, filter, sort, minPrice, maxPrice])
 
   const totalValue = user.inventory.reduce((sum, item) => sum + item.price, 0)
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
+  const selectedItems = useMemo(
+    () => user.inventory.filter((item) => selectedSet.has(item.instanceId)),
+    [user.inventory, selectedSet],
+  )
+  const selectedValue = selectedItems.reduce((sum, item) => sum + item.price, 0)
+
+  useEffect(() => {
+    setSelectedIds((previous) =>
+      previous.filter((instanceId) =>
+        user.inventory.some((item) => item.instanceId === instanceId),
+      ),
+    )
+  }, [user.inventory])
+
+  function toggleSelectMode() {
+    if (sellingAll) return
+    if (selectMode) {
+      setSelectMode(false)
+      setSelectedIds([])
+    } else {
+      setConfirmSellAll(false)
+      setSelectMode(true)
+    }
+  }
+
+  function toggleSelect(item) {
+    if (sellingAll) return
+    setSelectedIds((previous) =>
+      previous.includes(item.instanceId)
+        ? previous.filter((instanceId) => instanceId !== item.instanceId)
+        : [...previous, item.instanceId],
+    )
+  }
 
   async function sell(item) {
     if (sellingId || sellingAll) return
@@ -4116,10 +4152,28 @@ function InventorySection({ user, onSell, onSellMany, onWithdraw }) {
     if (sellingAll || !user.inventory.length) return
     setSellingAll(true)
     try {
-      await onSellMany()
+      const sold = await onSellMany(user.inventory.map((item) => item.instanceId))
+      if (sold) {
+        setSelectedIds([])
+        setSelectMode(false)
+      }
     } finally {
       setSellingAll(false)
       setConfirmSellAll(false)
+    }
+  }
+
+  async function sellSelected() {
+    if (sellingAll || !selectedIds.length) return
+    setSellingAll(true)
+    try {
+      const sold = await onSellMany(selectedIds)
+      if (sold) {
+        setSelectedIds([])
+        setSelectMode(false)
+      }
+    } finally {
+      setSellingAll(false)
     }
   }
 
@@ -4187,6 +4241,20 @@ function InventorySection({ user, onSell, onSellMany, onWithdraw }) {
             </span>
             <button
               type="button"
+              onClick={toggleSelectMode}
+              disabled={!user.inventory.length || sellingAll}
+              className={cx(
+                'flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[9px] font-extrabold transition disabled:cursor-not-allowed disabled:opacity-35',
+                selectMode
+                  ? 'border-acid/40 bg-acid/[0.1] text-acid'
+                  : 'border-white/[0.1] bg-white/[0.035] text-white/55 hover:border-acid/30 hover:text-acid',
+              )}
+            >
+              <Icon name={selectMode ? 'x' : 'check'} size={12} />
+              {selectMode ? 'Отменить выбор' : 'Выделить'}
+            </button>
+            <button
+              type="button"
               onClick={() => setConfirmSellAll(true)}
               disabled={!user.inventory.length || sellingAll || Boolean(sellingId)}
               className="flex items-center gap-1.5 rounded-lg border border-[#ff5d7a]/25 bg-[#ff5d7a]/[0.07] px-3 py-2 text-[9px] font-extrabold text-[#ff9aac] transition hover:border-[#ff5d7a]/40 hover:bg-[#ff5d7a]/[0.12] disabled:cursor-not-allowed disabled:opacity-35"
@@ -4196,6 +4264,46 @@ function InventorySection({ user, onSell, onSellMany, onWithdraw }) {
             </button>
           </div>
         </div>
+
+        {selectMode && (
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-acid/20 bg-acid/[0.055] px-3 py-2.5">
+            <span className="text-[9px] font-semibold text-white/55">
+              Выбрано:{' '}
+              <span className="font-black text-acid">
+                {selectedItems.length}{' '}
+                {plural(selectedItems.length, ['предмет', 'предмета', 'предметов'])}
+              </span>{' '}
+              · {formatGold(selectedValue)}
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedIds(items.map((item) => item.instanceId))}
+                disabled={!items.length || sellingAll}
+                className="rounded-lg border border-white/[0.09] px-2.5 py-2 text-[8px] font-bold text-white/45 transition hover:border-white/20 hover:text-white/75 disabled:opacity-35"
+              >
+                Выбрать все видимые
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedIds([])}
+                disabled={!selectedIds.length || sellingAll}
+                className="rounded-lg border border-white/[0.09] px-2.5 py-2 text-[8px] font-bold text-white/45 transition hover:border-white/20 hover:text-white/75 disabled:opacity-35"
+              >
+                Снять
+              </button>
+              <button
+                type="button"
+                onClick={sellSelected}
+                disabled={!selectedIds.length || sellingAll || Boolean(sellingId)}
+                className="flex items-center gap-1.5 rounded-lg border border-[#ff5d7a]/30 bg-[#ff5d7a]/[0.1] px-3 py-2 text-[9px] font-black uppercase tracking-[0.05em] text-[#ff9aac] transition hover:bg-[#ff5d7a]/[0.16] disabled:cursor-not-allowed disabled:opacity-35"
+              >
+                <Icon name="tag" size={12} />
+                {sellingAll ? 'Продаём...' : 'Продать выбранные'}
+              </button>
+            </div>
+          </div>
+        )}
 
         {confirmSellAll && (
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#ff5d7a]/25 bg-[#ff5d7a]/[0.06] px-3 py-2.5">
@@ -4230,13 +4338,46 @@ function InventorySection({ user, onSell, onSellMany, onWithdraw }) {
             {items.map((item) => {
               const meta = RARITY[item.rarity] || RARITY.Common
               const isSelling = sellingId === item.instanceId
+              const selected = selectMode && selectedSet.has(item.instanceId)
               return (
                 <article
                   key={item.instanceId}
-                  className="group overflow-hidden rounded-2xl border border-white/[0.075] bg-[#0b120d] transition duration-200 hover:border-white/[0.15] hover:shadow-[0_18px_45px_rgba(0,0,0,.28)]"
+                  role={selectMode ? 'button' : undefined}
+                  tabIndex={selectMode ? 0 : undefined}
+                  aria-pressed={selectMode ? selected : undefined}
+                  onClick={selectMode ? () => toggleSelect(item) : undefined}
+                  onKeyDown={
+                    selectMode
+                      ? (event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault()
+                            toggleSelect(item)
+                          }
+                        }
+                      : undefined
+                  }
+                  className={cx(
+                    'group relative overflow-hidden rounded-2xl border bg-[#0b120d] transition duration-200',
+                    selectMode && 'cursor-pointer',
+                    selected
+                      ? 'border-acid/55 bg-acid/[0.04] shadow-[0_0_28px_rgba(53,255,135,.12)]'
+                      : 'border-white/[0.075] hover:border-white/[0.15] hover:shadow-[0_18px_45px_rgba(0,0,0,.28)]',
+                  )}
                   style={{ '--rarity-border': `${meta.color}30` }}
                 >
                   <SkinVisual skin={item} className="h-28 w-full sm:h-32" />
+                  {selectMode && (
+                    <span
+                      className={cx(
+                        'absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-lg border transition',
+                        selected
+                          ? 'border-acid bg-acid text-[#041007]'
+                          : 'border-white/30 bg-black/50 text-white/35',
+                      )}
+                    >
+                      {selected && <Icon name="check" size={14} strokeWidth={3} />}
+                    </span>
+                  )}
                   <div className="p-3">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
@@ -4253,29 +4394,35 @@ function InventorySection({ user, onSell, onSellMany, onWithdraw }) {
                       </div>
                     </div>
 
-                    <div className="mt-3 grid grid-cols-[1fr_auto] gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => sell(item)}
-                        disabled={Boolean(sellingId)}
-                        className="flex items-center justify-center gap-1.5 rounded-lg border border-acid/22 bg-acid/[0.08] px-2 py-2 text-[9px] font-extrabold text-acid transition hover:bg-acid hover:text-[#041007] disabled:opacity-40"
-                      >
-                        {isSelling ? (
-                          <span className="spin-ring h-3 w-3 rounded-full border-2 border-current/30 border-t-current" />
-                        ) : (
-                          <Icon name="tag" size={12} />
-                        )}
-                        Продать
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onWithdraw(item)}
-                        className="flex items-center justify-center gap-1.5 rounded-lg border border-white/[0.09] bg-white/[0.03] px-2.5 py-2 text-[9px] font-extrabold text-white/48 transition hover:border-white/20 hover:text-white"
-                      >
-                        <Icon name="download" size={12} />
-                        Вывести
-                      </button>
-                    </div>
+                    {selectMode ? (
+                      <div className="mt-3 rounded-lg border border-white/[0.06] bg-white/[0.02] px-2 py-2 text-center text-[8px] font-bold text-white/35">
+                        {selected ? 'Выбран для продажи' : 'Нажмите, чтобы выделить'}
+                      </div>
+                    ) : (
+                      <div className="mt-3 grid grid-cols-[1fr_auto] gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => sell(item)}
+                          disabled={Boolean(sellingId)}
+                          className="flex items-center justify-center gap-1.5 rounded-lg border border-acid/22 bg-acid/[0.08] px-2 py-2 text-[9px] font-extrabold text-acid transition hover:bg-acid hover:text-[#041007] disabled:opacity-40"
+                        >
+                          {isSelling ? (
+                            <span className="spin-ring h-3 w-3 rounded-full border-2 border-current/30 border-t-current" />
+                          ) : (
+                            <Icon name="tag" size={12} />
+                          )}
+                          Продать
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onWithdraw(item)}
+                          className="flex items-center justify-center gap-1.5 rounded-lg border border-white/[0.09] bg-white/[0.03] px-2.5 py-2 text-[9px] font-extrabold text-white/48 transition hover:border-white/20 hover:text-white"
+                        >
+                          <Icon name="download" size={12} />
+                          Вывести
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </article>
               )
@@ -6985,20 +7132,22 @@ export default function App() {
     }
   }
 
-  async function sellAllItems() {
-    if (!token || !user.inventory.length) return
+  async function sellManyItems(instanceIds) {
+    if (!token || !instanceIds?.length) return false
     try {
       const data = await apiRequest('/api/sell-many', {
         method: 'POST',
         token,
-        body: { instanceIds: user.inventory.map((item) => item.instanceId) },
+        body: { instanceIds },
       })
       applyUpdate(data)
       playCoin()
       pushToast(data.message, 'success')
+      return true
     } catch (error) {
       pushToast(error.message, 'error')
       if (error.data?.user) applyUpdate(error.data)
+      return false
     }
   }
 
@@ -7128,7 +7277,7 @@ export default function App() {
             <InventorySection
               user={user}
               onSell={sellItem}
-              onSellMany={sellAllItems}
+              onSellMany={sellManyItems}
               onWithdraw={(item) => setWithdrawSkin(item)}
             />
           )}
