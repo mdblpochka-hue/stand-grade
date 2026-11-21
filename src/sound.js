@@ -64,8 +64,8 @@ function tone({ freq, duration = 0.12, type = 'triangle', gain = 0.05, slideTo, 
   oscillator.stop(startAt + duration + 0.03)
 }
 
-function tick(freq, gain = 0.024) {
-  tone({ freq, duration: 0.035, type: 'square', gain })
+function tick(freq, gain = 0.024, duration = 0.035) {
+  tone({ freq, duration, type: 'square', gain })
 }
 
 /**
@@ -100,6 +100,65 @@ export function startSpinSound(duration, variant = 'case') {
   return () => {
     stopped = true
     timers.forEach((timer) => clearTimeout(timer))
+  }
+}
+
+/**
+ * Тики апгрейда строго по вращению стрелки: звук играет в момент,
+ * когда стрелка пересекает очередную чёрточку на колесе (каждые 9°).
+ */
+export function startUpgradeTickSound(needle, duration) {
+  if (!enabled || !needle) return () => {}
+  const ctx = ensureContext()
+  if (!ctx) return () => {}
+
+  const step = duration < 1000 ? 45 : 9
+  const startedAt = performance.now()
+  let stopped = false
+  let frameId = 0
+  let lastAngle = 0
+  let cumulative = 0
+  let lastTick = -1
+
+  const poll = () => {
+    if (stopped) return
+    let angle = 0
+    const transform = window.getComputedStyle(needle).transform
+    if (transform && transform !== 'none') {
+      const values = transform.match(/matrix\(([^)]+)\)/)
+      if (values) {
+        const parts = values[1].split(',').map(Number)
+        if (parts.length >= 2 && Number.isFinite(parts[0]) && Number.isFinite(parts[1])) {
+          angle = (Math.atan2(parts[1], parts[0]) * 180) / Math.PI
+        }
+      }
+    }
+    angle = ((angle % 360) + 360) % 360
+
+    let delta = angle - lastAngle
+    if (delta < -180) delta += 360
+    cumulative += delta
+    lastAngle = angle
+
+    const tickIndex = Math.floor(cumulative / step)
+    if (tickIndex > lastTick) {
+      const count = Math.min(3, tickIndex - lastTick)
+      for (let index = 0; index < count; index += 1) {
+        tick(1480 + ((tickIndex + index) % 4) * 45, 0.014, 0.016)
+      }
+      lastTick = tickIndex
+    }
+
+    if (performance.now() - startedAt < duration + 220) {
+      frameId = requestAnimationFrame(poll)
+    }
+  }
+
+  frameId = requestAnimationFrame(poll)
+
+  return () => {
+    stopped = true
+    cancelAnimationFrame(frameId)
   }
 }
 

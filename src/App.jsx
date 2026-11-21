@@ -14,6 +14,7 @@ import {
   playUpgradeResult,
   setSoundEnabled,
   startSpinSound,
+  startUpgradeTickSound,
   unlockAudio,
 } from './sound'
 
@@ -3183,7 +3184,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
     needle.style.transition = 'none'
     needle.style.transform = 'rotate(0deg)'
     void needle.offsetWidth
-    const stopSound = startSpinSound(duration, 'upgrade')
+    const stopSound = startUpgradeTickSound(needle, duration)
     const frame = requestAnimationFrame(() => {
       needle.style.transition = `transform ${duration}ms ${UPGRADE_EASING}`
       needle.style.transform = `rotate(${spin.angle}deg)`
