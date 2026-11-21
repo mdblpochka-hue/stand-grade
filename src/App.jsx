@@ -1544,6 +1544,85 @@ function SectionHeading({ eyebrow, title, description, action }) {
   )
 }
 
+function PriceSortControls({
+  sort,
+  onSortChange,
+  minPrice,
+  maxPrice,
+  onMinPriceChange,
+  onMaxPriceChange,
+  className = '',
+}) {
+  const updateNumber = (value, setter) => {
+    setter(String(value || '').replace(/[^0-9]/g, '').slice(0, 8))
+  }
+
+  return (
+    <div className={cx('flex flex-wrap items-center gap-1.5', className)}>
+      <div className="flex h-9 items-center rounded-lg border border-white/[0.08] bg-white/[0.025] p-0.5">
+        <button
+          type="button"
+          onClick={() => onSortChange('asc')}
+          aria-pressed={sort === 'asc'}
+          title="Сначала дешёвые"
+          className={cx(
+            'h-8 rounded-md px-2.5 text-[9px] font-extrabold transition',
+            sort === 'asc' ? 'bg-acid text-[#041007]' : 'text-white/35 hover:text-white/70',
+          )}
+        >
+          ↑ Дешёвые
+        </button>
+        <button
+          type="button"
+          onClick={() => onSortChange('desc')}
+          aria-pressed={sort === 'desc'}
+          title="Сначала дорогие"
+          className={cx(
+            'h-8 rounded-md px-2.5 text-[9px] font-extrabold transition',
+            sort === 'desc' ? 'bg-acid text-[#041007]' : 'text-white/35 hover:text-white/70',
+          )}
+        >
+          ↓ Дорогие
+        </button>
+      </div>
+
+      <div className="flex h-9 items-center gap-1 rounded-lg border border-white/[0.08] bg-black/20 px-2">
+        <input
+          value={minPrice}
+          onChange={(event) => updateNumber(event.target.value, onMinPriceChange)}
+          inputMode="numeric"
+          placeholder="От"
+          aria-label="Минимальная цена"
+          className="h-full w-11 bg-transparent text-[9px] font-bold tabular-nums text-white placeholder:text-white/22 focus:outline-none"
+        />
+        <span className="text-[9px] text-white/18">—</span>
+        <input
+          value={maxPrice}
+          onChange={(event) => updateNumber(event.target.value, onMaxPriceChange)}
+          inputMode="numeric"
+          placeholder="До"
+          aria-label="Максимальная цена"
+          className="h-full w-11 bg-transparent text-[9px] font-bold tabular-nums text-white placeholder:text-white/22 focus:outline-none"
+        />
+        <span className="text-[8px] font-bold text-white/24">G</span>
+      </div>
+
+      {(minPrice || maxPrice) && (
+        <button
+          type="button"
+          onClick={() => {
+            onMinPriceChange('')
+            onMaxPriceChange('')
+          }}
+          className="h-9 rounded-lg border border-white/[0.08] px-2.5 text-[8px] font-black uppercase tracking-[0.06em] text-white/35 transition hover:border-white/20 hover:text-white/70"
+        >
+          Сброс
+        </button>
+      )}
+    </div>
+  )
+}
+
 function CasesSection({ cases, onOpen, user, now }) {
   return (
     <section id="cases" className="pt-10 sm:pt-14">
@@ -2997,6 +3076,9 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
   const [boost, setBoost] = useState(0)
   const [customChance, setCustomChance] = useState('')
   const [targetQuery, setTargetQuery] = useState('')
+  const [targetSort, setTargetSort] = useState('asc')
+  const [targetMinPrice, setTargetMinPrice] = useState('')
+  const [targetMaxPrice, setTargetMaxPrice] = useState('')
   const [targetLimit, setTargetLimit] = useState(120)
   const [spin, setSpin] = useState(null)
   const needleRef = useRef(null)
@@ -3020,18 +3102,23 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
   )
   const filteredTargets = useMemo(() => {
     const normalized = targetQuery.trim().toLowerCase()
-    if (!normalized) return higherTargets
-    return higherTargets.filter(
-      (skin) =>
-        skin.name.toLowerCase().includes(normalized) ||
-        String(skin.weapon || '').toLowerCase().includes(normalized),
-    )
-  }, [higherTargets, targetQuery])
+    const min = targetMinPrice ? Number(targetMinPrice) : 0
+    const max = targetMaxPrice ? Number(targetMaxPrice) : Infinity
+    return higherTargets
+      .filter((skin) => skin.price >= min && skin.price <= max)
+      .filter(
+        (skin) =>
+          !normalized ||
+          skin.name.toLowerCase().includes(normalized) ||
+          String(skin.weapon || '').toLowerCase().includes(normalized),
+      )
+      .sort((a, b) => (targetSort === 'asc' ? a.price - b.price : b.price - a.price))
+  }, [higherTargets, targetQuery, targetSort, targetMinPrice, targetMaxPrice])
   const visibleTargets = filteredTargets.slice(0, targetLimit)
 
   useEffect(() => {
     setTargetLimit(120)
-  }, [targetQuery, baseTotal, baseIds.length])
+  }, [targetQuery, targetSort, targetMinPrice, targetMaxPrice, baseTotal, baseIds.length])
 
   const target = useMemo(
     () => higherTargets.find((skin) => skin.id === targetId) || null,
@@ -3793,6 +3880,16 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
               />
             </div>
 
+            <PriceSortControls
+              sort={targetSort}
+              onSortChange={setTargetSort}
+              minPrice={targetMinPrice}
+              maxPrice={targetMaxPrice}
+              onMinPriceChange={setTargetMinPrice}
+              onMaxPriceChange={setTargetMaxPrice}
+              className="mt-2"
+            />
+
             {higherTargets.length ? (
               <div className="no-scrollbar mt-3 grid max-h-[480px] grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3 lg:grid-cols-2 2xl:grid-cols-3">
                 {visibleTargets.map((skin) => {
@@ -3978,20 +4075,28 @@ const INVENTORY_FILTERS = [
 
 function InventorySection({ user, onSell, onWithdraw }) {
   const [filter, setFilter] = useState('all')
+  const [sort, setSort] = useState('desc')
+  const [minPrice, setMinPrice] = useState('')
+  const [maxPrice, setMaxPrice] = useState('')
   const [sellingId, setSellingId] = useState(null)
 
   const items = useMemo(() => {
-    return user.inventory.filter((item) => {
-      if (filter === 'epic') return ['Epic', 'Legendary', 'Arcane', 'Nameless'].includes(item.rarity)
-      if (filter === 'high') return item.price >= 100
-      if (filter === 'knives') {
-        return ['Karambit', 'M9 Bayonet', 'Butterfly Knife', 'Kunai', 'Gloves', 'Flip', 'Mantis', 'Sting'].includes(
-          item.weapon,
-        )
-      }
-      return true
-    })
-  }, [user.inventory, filter])
+    const min = minPrice ? Number(minPrice) : 0
+    const max = maxPrice ? Number(maxPrice) : Infinity
+    return user.inventory
+      .filter((item) => {
+        if (item.price < min || item.price > max) return false
+        if (filter === 'epic') return ['Epic', 'Legendary', 'Arcane', 'Nameless'].includes(item.rarity)
+        if (filter === 'high') return item.price >= 100
+        if (filter === 'knives') {
+          return ['Karambit', 'M9 Bayonet', 'Butterfly Knife', 'Kunai', 'Gloves', 'Flip', 'Mantis', 'Sting'].includes(
+            item.weapon,
+          )
+        }
+        return true
+      })
+      .sort((a, b) => (sort === 'asc' ? a.price - b.price : b.price - a.price))
+  }, [user.inventory, filter, sort, minPrice, maxPrice])
 
   const totalValue = user.inventory.reduce((sum, item) => sum + item.price, 0)
 
@@ -4052,6 +4157,20 @@ function InventorySection({ user, onSell, onWithdraw }) {
             <Icon name="shield" size={11} />
             демо-инвентарь · без вывода
           </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <PriceSortControls
+            sort={sort}
+            onSortChange={setSort}
+            minPrice={minPrice}
+            maxPrice={maxPrice}
+            onMinPriceChange={setMinPrice}
+            onMaxPriceChange={setMaxPrice}
+          />
+          <span className="text-[8px] font-semibold text-white/24">
+            Показано {items.length} из {user.inventory.length}
+          </span>
         </div>
 
         {items.length ? (
@@ -5423,6 +5542,9 @@ function CaseModal({
 function StoreModal({ catalog, balance, token, onClose, onUpdate, onToast }) {
   const [filter, setFilter] = useState('all')
   const [query, setQuery] = useState('')
+  const [sort, setSort] = useState('desc')
+  const [minPrice, setMinPrice] = useState('')
+  const [maxPrice, setMaxPrice] = useState('')
   const [buying, setBuying] = useState(null)
   const [visibleCount, setVisibleCount] = useState(80)
 
@@ -5431,15 +5553,18 @@ function StoreModal({ catalog, balance, token, onClose, onUpdate, onToast }) {
 
   const items = useMemo(() => {
     const normalized = query.trim().toLowerCase()
+    const min = minPrice ? Number(minPrice) : 0
+    const max = maxPrice ? Number(maxPrice) : Infinity
     return catalog
+      .filter((skin) => skin.price >= min && skin.price <= max)
       .filter((skin) => filter === 'all' || skin.rarity === filter)
       .filter((skin) => !normalized || skin.name.toLowerCase().includes(normalized) || skin.weapon.toLowerCase().includes(normalized))
-      .sort((a, b) => b.price - a.price)
-  }, [catalog, filter, query])
+      .sort((a, b) => (sort === 'asc' ? a.price - b.price : b.price - a.price))
+  }, [catalog, filter, query, sort, minPrice, maxPrice])
 
   useEffect(() => {
     setVisibleCount(80)
-  }, [filter, query])
+  }, [filter, query, sort, minPrice, maxPrice])
 
   const visibleItems = items.slice(0, visibleCount)
 
@@ -5551,6 +5676,20 @@ function StoreModal({ catalog, balance, token, onClose, onUpdate, onToast }) {
                 )
               })}
             </div>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <PriceSortControls
+              sort={sort}
+              onSortChange={setSort}
+              minPrice={minPrice}
+              maxPrice={maxPrice}
+              onMinPriceChange={setMinPrice}
+              onMaxPriceChange={setMaxPrice}
+            />
+            <span className="text-[8px] font-semibold text-white/24">
+              Найдено {items.length} из {catalog.length}
+            </span>
           </div>
 
           {items.length ? (
