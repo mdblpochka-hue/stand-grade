@@ -4377,7 +4377,7 @@ function LoginScreen({ onLogin, notice }) {
               </div>
 
               <p className="mt-4 text-[10px] leading-relaxed text-white/32">
-                Войди, чтобы открывать кейсы, копить скины и пользоваться дневным лимитом пополнения.
+                Войди, чтобы открывать кейсы, копить скины и собирать коллекцию.
               </p>
 
               {notice && (
@@ -4468,7 +4468,7 @@ function LoginScreen({ onLogin, notice }) {
               </div>
 
               <p className="mt-4 text-center text-[8px] leading-relaxed text-white/20">
-                Скрытые аккаунты owner и admin не отображаются в интерфейсе. Демо-проект, реальные платежи отключены.
+                Демо-проект. Реальные платежи отключены.
               </p>
             </div>
           </div>
