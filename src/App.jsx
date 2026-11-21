@@ -42,8 +42,8 @@ const ANIM_MS_FAST = 500
 const UPGRADE_EDGE = 0.9
 const UPGRADE_MAX_ITEMS = 7
 const REEL_EASING = 'cubic-bezier(.52,.02,.08,1)'
-// Более спокойное колесо апгрейда: без резкого разгона, с плавным торможением.
-const UPGRADE_EASING = 'cubic-bezier(.3,.3,.2,1)'
+// Спокойное колесо апгрейда: плавный разгон, умеренная скорость и плавное затухание.
+const UPGRADE_EASING = 'cubic-bezier(.42,0,.58,1)'
 const WINNER_INDEX = 34
 const OPEN_COUNTS = [1, 2, 3, 4, 5, 10]
 
