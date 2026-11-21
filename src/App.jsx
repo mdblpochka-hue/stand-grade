@@ -40,6 +40,7 @@ const RARITY = {
 const ANIM_MS_NORMAL = 3500
 const ANIM_MS_FAST = 500
 const UPGRADE_EDGE = 0.9
+const UPGRADE_MAX_ITEMS = 7
 const REEL_EASING = 'cubic-bezier(.52,.02,.08,1)'
 const WINNER_INDEX = 34
 const OPEN_COUNTS = [1, 2, 3, 4, 5, 10]
@@ -2988,7 +2989,7 @@ function PromoSection({ promos, user, token, event, onUpdate, onToast }) {
 
 function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, onToast }) {
   const inventory = user.inventory
-  const [baseId, setBaseId] = useState(inventory[0]?.instanceId || null)
+  const [baseIds, setBaseIds] = useState(() => (inventory[0] ? [inventory[0].instanceId] : []))
   const [targetId, setTargetId] = useState(null)
   const [upgrading, setUpgrading] = useState(false)
   const [result, setResult] = useState(null)
@@ -3001,13 +3002,21 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
   const needleRef = useRef(null)
   const duration = fast ? ANIM_MS_FAST : ANIM_MS_NORMAL
 
-  const base = useMemo(
-    () => inventory.find((item) => item.instanceId === baseId) || null,
-    [inventory, baseId],
+  const baseItems = useMemo(
+    () =>
+      baseIds
+        .map((instanceId) => inventory.find((item) => item.instanceId === instanceId))
+        .filter(Boolean),
+    [inventory, baseIds],
   )
+  const baseTotal = useMemo(
+    () => Math.round(baseItems.reduce((sum, item) => sum + item.price, 0) * 100) / 100,
+    [baseItems],
+  )
+  const base = baseItems[0] || null
   const higherTargets = useMemo(
-    () => (base ? catalog.filter((skin) => skin.price > base.price) : []),
-    [base, catalog],
+    () => (baseItems.length ? catalog.filter((skin) => skin.price > baseTotal) : []),
+    [baseItems, baseTotal, catalog],
   )
   const filteredTargets = useMemo(() => {
     const normalized = targetQuery.trim().toLowerCase()
@@ -3022,47 +3031,61 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
 
   useEffect(() => {
     setTargetLimit(120)
-  }, [targetQuery, baseId])
+  }, [targetQuery, baseTotal, baseIds.length])
 
   const target = useMemo(
     () => higherTargets.find((skin) => skin.id === targetId) || null,
     [higherTargets, targetId],
   )
-  const maxBoost = base && target ? Math.max(0, Math.round((target.price * UPGRADE_EDGE - base.price) * 100) / 100) : 0
+  const maxBoost =
+    baseItems.length && target
+      ? Math.max(0, Math.round((target.price * UPGRADE_EDGE - baseTotal) * 100) / 100)
+      : 0
   const boostCap = Math.min(maxBoost, Math.max(0, user.balance))
   const chance =
-    base && target
+    baseItems.length && target
       ? Math.min(
           90,
-          Math.max(1, Math.round(((base.price + boost) / target.price) * 90 * 100) / 100),
+          Math.max(1, Math.round(((baseTotal + boost) / target.price) * 90 * 100) / 100),
         )
       : 0
   const naturalChance =
-    base && target
-      ? Math.min(90, Math.max(1, Math.round((base.price / target.price) * 90 * 100) / 100))
+    baseItems.length && target
+      ? Math.min(90, Math.max(1, Math.round((baseTotal / target.price) * 90 * 100) / 100))
       : 0
-  const profit = base && target ? Math.round((target.price - base.price - boost) * 100) / 100 : 0
-  const multiplier = base && target ? target.price / (base.price + boost) : 0
+  const profit =
+    baseItems.length && target ? Math.round((target.price - baseTotal - boost) * 100) / 100 : 0
+  const multiplier =
+    baseItems.length && target ? target.price / (baseTotal + boost) : 0
+  const resultBaseSkins = result?.baseSkins || (result?.baseSkin ? [result.baseSkin] : [])
+  const resultBaseTotal =
+    result?.baseTotal ?? Math.round(resultBaseSkins.reduce((sum, skin) => sum + skin.price, 0) * 100) / 100
 
   useEffect(() => {
-    if (!inventory.length) {
-      if (baseId) setBaseId(null)
-      return
-    }
-    if (!inventory.some((item) => item.instanceId === baseId)) {
-      setBaseId(inventory[0].instanceId)
-    }
-  }, [inventory, baseId])
+    setBaseIds((previous) => {
+      const valid = previous
+        .filter((instanceId) => inventory.some((item) => item.instanceId === instanceId))
+        .slice(0, UPGRADE_MAX_ITEMS)
+      if (!valid.length && inventory[0]) return [inventory[0].instanceId]
+      if (
+        valid.length === previous.length &&
+        valid.every((instanceId, index) => instanceId === previous[index])
+      ) {
+        return previous
+      }
+      return valid
+    })
+  }, [inventory])
 
   useEffect(() => {
-    if (!base) {
+    if (!baseItems.length) {
       if (targetId) setTargetId(null)
       return
     }
     if (!higherTargets.some((skin) => skin.id === targetId)) {
       setTargetId(higherTargets[0]?.id || null)
     }
-  }, [base, higherTargets, targetId])
+  }, [baseItems.length, higherTargets, targetId])
 
   useLayoutEffect(() => {
     if (!spin) return undefined
@@ -3104,7 +3127,16 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
 
   function chooseBase(item) {
     if (upgrading) return
-    setBaseId(item.instanceId)
+    const selected = baseIds.includes(item.instanceId)
+    if (!selected && baseIds.length >= UPGRADE_MAX_ITEMS) {
+      onToast(`В одном апгрейде можно использовать до ${UPGRADE_MAX_ITEMS} предметов`, 'error')
+      return
+    }
+    setBaseIds(
+      selected
+        ? baseIds.filter((instanceId) => instanceId !== item.instanceId)
+        : [...baseIds, item.instanceId],
+    )
     setTargetId(null)
     setBoost(0)
     setCustomChance('')
@@ -3126,8 +3158,8 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
   }
 
   function quickPick(chancePercent) {
-    if (!base) return
-    const ideal = base.price * (90 / chancePercent)
+    if (!baseItems.length) return
+    const ideal = baseTotal * (90 / chancePercent)
     if (!higherTargets.length) return
     const best = higherTargets.reduce((closest, skin) => {
       const currentDistance = Math.abs(skin.price - ideal)
@@ -3140,13 +3172,13 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
   }
 
   function applyCustomChance(value) {
-    if (!base || !higherTargets.length) return
+    if (!baseItems.length || !higherTargets.length) return
     const percent = Math.min(90, Math.max(1, Number(value) || 1))
     // Ищем цель, для которой нужна минимальная доплата, и добиваем шанс балансом.
     const options = higherTargets
       .map((skin) => ({
         skin,
-        need: Math.round((skin.price * (percent / 90) - base.price) * 100) / 100,
+        need: Math.round((skin.price * (percent / 90) - baseTotal) * 100) / 100,
       }))
       .filter((option) => option.need >= -0.01)
       .sort((a, b) => a.need - b.need)
@@ -3157,7 +3189,11 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
     }
     setTargetId(option.skin.id)
     const needed = Math.max(0, option.need)
-    const affordable = Math.min(needed, Math.max(0, user.balance), Math.max(0, option.skin.price * UPGRADE_EDGE - base.price))
+    const affordable = Math.min(
+      needed,
+      Math.max(0, user.balance),
+      Math.max(0, option.skin.price * UPGRADE_EDGE - baseTotal),
+    )
     setBoost(Math.round(affordable * 100) / 100)
     setCustomChance(String(percent))
     setError(needed > user.balance ? 'Недостаточно баланса для точного шанса — доплата ограничена' : '')
@@ -3172,7 +3208,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
   }
 
   async function runUpgrade() {
-    if (!base || !target || upgrading) return
+    if (!baseItems.length || !target || upgrading) return
     unlockAudio()
     setUpgrading(true)
     setError('')
@@ -3181,7 +3217,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
       const data = await apiRequest('/api/upgrade', {
         method: 'POST',
         token,
-        body: { instanceId: base.instanceId, targetSkinId: target.id, boost },
+        body: { instanceIds: baseIds, targetSkinId: target.id, boost },
       })
       const serverChance = Math.max(0, Math.min(100, Number(data.chance) || 0))
       const winDeg = serverChance * 3.6
@@ -3220,8 +3256,9 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
               АПГРЕЙД <span className="text-gradient">СКИНОВ</span>
             </h2>
             <p className="mt-2 max-w-2xl text-[11px] leading-relaxed text-white/40 sm:text-[12px]">
-              Главная арена STAND GRADE: меняй скин на более дорогой, запускай колесо шанса и забирай
-              профит. Расчёт фиксируется на сервере и не подменяется клиентом.
+              Главная арена STAND GRADE: объединяй до {UPGRADE_MAX_ITEMS} скинов и меняй их на более
+              дорогой предмет, запускай колесо шанса и забирай профит. Расчёт фиксируется на сервере и не
+              подменяется клиентом.
             </p>
           </div>
 
@@ -3295,17 +3332,20 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                     1
                   </span>
                   <span className="text-[9px] font-black uppercase tracking-[0.17em] text-white/40">
-                    Ваш скин
+                    Ваши скины
                   </span>
                 </div>
-                <span className="text-[9px] font-semibold text-white/24">{inventory.length} в инвентаре</span>
+                <span className="text-[9px] font-semibold text-white/24">
+                  {baseIds.length}/{UPGRADE_MAX_ITEMS} выбрано · {inventory.length} в инвентаре
+                </span>
               </div>
 
               {inventory.length ? (
                 <div className="no-scrollbar mt-3 flex gap-2 overflow-x-auto pb-1">
                   {inventory.map((item) => {
                     const meta = RARITY[item.rarity] || RARITY.Common
-                    const selected = item.instanceId === baseId
+                    const selected = baseIds.includes(item.instanceId)
+                    const selectedIndex = baseIds.indexOf(item.instanceId)
                     return (
                       <button
                         key={item.instanceId}
@@ -3335,8 +3375,8 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                           </div>
                         </div>
                         {selected && (
-                          <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-acid text-[#041007]">
-                            <Icon name="check" size={10} strokeWidth={3} />
+                          <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-acid text-[9px] font-black text-[#041007]">
+                            {selectedIndex + 1}
                           </span>
                         )}
                       </button>
@@ -3371,10 +3411,17 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
               <div className="mt-4 grid grid-cols-2 items-stretch gap-2 sm:mt-5 sm:gap-3 md:grid-cols-[minmax(0,1fr)_260px_minmax(0,1fr)] md:items-center md:gap-4">
                 <div className="min-w-0 md:col-start-1 md:row-start-1">
                   <div className="mb-1.5 flex items-center justify-between gap-1">
-                    <span className="text-[8px] font-black uppercase tracking-[0.14em] text-white/28">Отдаёте</span>
-                    {base && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: RARITY[base.rarity].color }} />}
+                    <span className="text-[8px] font-black uppercase tracking-[0.14em] text-white/28">
+                      Отдаёте · {baseItems.length}/{UPGRADE_MAX_ITEMS}
+                    </span>
+                    {base && (
+                      <span
+                        className="h-1.5 w-1.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: RARITY[base.rarity].color }}
+                      />
+                    )}
                   </div>
-                  {base ? (
+                  {baseItems.length === 1 ? (
                     <div
                       className="relative overflow-hidden rounded-xl border bg-black/25 sm:rounded-2xl"
                       style={{ borderColor: `${RARITY[base.rarity].color}38` }}
@@ -3383,7 +3430,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#040804] via-[#040804]/80 to-transparent p-2 pt-7 sm:p-2.5 sm:pt-8">
                         <div className="truncate text-[10px] font-extrabold text-white sm:text-[11px]">{base.name}</div>
                         <div className="mt-0.5 flex items-center justify-between gap-1">
-                          <span className="text-[9px] font-bold tabular-nums text-white/42">{formatPrice(base.price)}</span>
+                          <span className="text-[9px] font-bold tabular-nums text-white/42">{formatPrice(baseTotal)}</span>
                           <span
                             className="hidden truncate text-[6.5px] font-black uppercase tracking-[0.08em] sm:block"
                             style={{ color: RARITY[base.rarity].color }}
@@ -3393,10 +3440,36 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                         </div>
                       </div>
                     </div>
+                  ) : baseItems.length > 1 ? (
+                    <div className="relative overflow-hidden rounded-xl border border-acid/25 bg-black/25 sm:rounded-2xl">
+                      <div className="grid grid-cols-2 gap-1 p-1.5">
+                        {baseItems.slice(0, 4).map((item) => (
+                          <div
+                            key={item.instanceId}
+                            className="relative h-[44px] overflow-hidden rounded-lg border border-white/[0.06] sm:h-[54px]"
+                          >
+                            <SkinVisual skin={item} className="h-full w-full" showRarity={false} />
+                          </div>
+                        ))}
+                      </div>
+                      {baseItems.length > 4 && (
+                        <span className="absolute right-2 top-2 rounded-full bg-acid px-1.5 py-0.5 text-[8px] font-black text-[#041007]">
+                          +{baseItems.length - 4}
+                        </span>
+                      )}
+                      <div className="flex items-center justify-between gap-1 border-t border-white/[0.07] px-2 py-1.5">
+                        <span className="text-[9px] font-extrabold text-white/70">
+                          {baseItems.length} {plural(baseItems.length, ['предмет', 'предмета', 'предметов'])}
+                        </span>
+                        <span className="text-[9px] font-black tabular-nums text-acid">{formatPrice(baseTotal)}</span>
+                      </div>
+                    </div>
                   ) : (
                     <div className="flex h-[142px] flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-white/10 bg-white/[0.015] px-2 text-center sm:h-[168px] sm:rounded-2xl">
                       <Icon name="box" size={18} className="text-white/15" />
-                      <span className="text-[9px] leading-tight text-white/25">Выберите скин</span>
+                      <span className="text-[9px] leading-tight text-white/25">
+                        Выберите до {UPGRADE_MAX_ITEMS} предметов
+                      </span>
                     </div>
                   )}
                 </div>
@@ -3489,7 +3562,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                           <span className="relative mt-1 font-display text-[36px] font-black leading-none tracking-[-0.07em] text-white sm:text-[42px]">
                             {chance ? `${chance.toFixed(chance >= 10 ? 0 : 1)}%` : '—'}
                           </span>
-                          {base && target ? (
+                          {baseItems.length && target ? (
                             <span className="relative mt-1.5 flex items-center gap-1 rounded-full border border-acid/15 bg-acid/[0.06] px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.08em] text-acid/80">
                               <Icon name="trending" size={9} />
                               {profit > 0 ? `+${formatPrice(profit)}` : 'профит'}
@@ -3558,7 +3631,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                         key={preset}
                         type="button"
                         onClick={() => quickPick(preset)}
-                        disabled={!base || !higherTargets.length || upgrading}
+                        disabled={!baseItems.length || !higherTargets.length || upgrading}
                         className={cx(
                           'group rounded-lg border px-2 py-2 text-[9px] font-extrabold transition disabled:cursor-not-allowed disabled:opacity-25',
                           active
@@ -3599,13 +3672,13 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                           }}
                           inputMode="decimal"
                           placeholder="37"
-                          disabled={!base || !higherTargets.length || upgrading}
+                          disabled={!baseItems.length || !higherTargets.length || upgrading}
                           className="h-9 min-w-0 flex-1 rounded-lg border border-white/[0.09] bg-black/30 px-2.5 text-[10px] font-bold tabular-nums text-white placeholder:text-white/20 focus:border-acid/40 focus:outline-none disabled:opacity-40"
                         />
                         <button
                           type="button"
                           onClick={() => applyCustomChance(customChance)}
-                          disabled={!base || !higherTargets.length || upgrading}
+                          disabled={!baseItems.length || !higherTargets.length || upgrading}
                           className="shrink-0 rounded-lg border border-acid/25 bg-acid/[0.08] px-2.5 text-[8px] font-black uppercase tracking-[0.06em] text-acid transition hover:bg-acid/[0.14] disabled:opacity-30"
                         >
                           Задать
@@ -3624,13 +3697,13 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                           onBlur={() => setBoost((value) => Math.min(boostCap, Math.max(0, Math.round(value * 100) / 100)))}
                           inputMode="decimal"
                           placeholder="0"
-                          disabled={!base || !target || upgrading || boostCap <= 0}
+                          disabled={!baseItems.length || !target || upgrading || boostCap <= 0}
                           className="h-9 min-w-0 flex-1 rounded-lg border border-white/[0.09] bg-black/30 px-2.5 text-[10px] font-bold tabular-nums text-white placeholder:text-white/20 focus:border-acid/40 focus:outline-none disabled:opacity-40"
                         />
                         <button
                           type="button"
                           onClick={() => setBoost(boostCap)}
-                          disabled={!base || !target || upgrading || boostCap <= 0}
+                          disabled={!baseItems.length || !target || upgrading || boostCap <= 0}
                           className="shrink-0 rounded-lg border border-white/[0.1] bg-white/[0.04] px-2 text-[8px] font-black uppercase tracking-[0.06em] text-white/55 transition hover:border-acid/30 hover:text-acid disabled:opacity-30"
                         >
                           Макс
@@ -3647,7 +3720,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                     <span className="text-white/30">
                       Вход:{' '}
                       <span className="font-black tabular-nums text-white/70">
-                        {base ? formatPrice(base.price + boost) : '—'}
+                        {baseItems.length ? formatPrice(baseTotal + boost) : '—'}
                       </span>
                       {boost > 0 ? ` (скин + ${formatPrice(boost)})` : ''}
                     </span>
@@ -3661,7 +3734,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
               <button
                 type="button"
                 onClick={runUpgrade}
-                disabled={!base || !target || upgrading}
+                disabled={!baseItems.length || !target || upgrading}
                 className="btn-acid group mt-4 w-full !py-4 !text-[12px] uppercase tracking-[0.1em] disabled:shadow-none"
               >
                 {upgrading ? (
@@ -3672,14 +3745,16 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                 ) : (
                   <>
                     <Icon name="refresh" size={16} strokeWidth={2.6} />
-                    {target ? `Апгрейд за ${base ? formatPrice(base.price + boost) : ''}` : 'Выберите цель'}
+                    {target
+                      ? `Апгрейд за ${baseItems.length ? formatPrice(baseTotal + boost) : ''}`
+                      : 'Выберите цель'}
                     {target && <span className="text-[10px] font-black text-[#041007]/55">{chance.toFixed(chance >= 10 ? 0 : 1)}%</span>}
                   </>
                 )}
               </button>
               <div className="mt-2 flex items-center justify-center gap-1.5 text-center text-[8px] font-semibold text-white/22">
                 <Icon name="alert" size={10} className="text-white/18" />
-                Стрелка остановится на секторе результата · при провале скин сгорает
+                Стрелка остановится на секторе результата · при провале предметы сгорают
               </div>
               {error && <div className="mt-2 text-center text-[9px] font-semibold text-[#ff8b9e]">{error}</div>}
             </div>
@@ -3723,13 +3798,13 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                 {visibleTargets.map((skin) => {
                   const meta = RARITY[skin.rarity] || RARITY.Common
                   const selected = targetId === skin.id
-                  const targetChance = base
+                  const targetChance = baseItems.length
                     ? Math.min(
                         90,
                         Math.max(
                           1,
                           Math.round(
-                            ((base.price + (selected ? boost : 0)) / skin.price) * 90 * 100,
+                            ((baseTotal + (selected ? boost : 0)) / skin.price) * 90 * 100,
                           ) / 100,
                         ),
                       )
@@ -3802,12 +3877,12 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                   <Icon name="crown" size={24} />
                 </div>
                 <div className="mt-3 text-[11px] font-bold text-white/45">
-                  {base ? 'Это максимальный скин' : 'Сначала выберите исходный скин'}
+                  {baseItems.length ? 'Это максимальный скин' : 'Сначала выберите исходные скины'}
                 </div>
                 <div className="mt-1.5 max-w-[210px] text-[9px] leading-relaxed text-white/24">
-                  {base
-                    ? 'Для апгрейда нужна цель дороже. Выберите скин подешевле.'
-                    : 'Цели появятся после выбора предмета из инвентаря.'}
+                  {baseItems.length
+                    ? 'Для апгрейда нужна цель дороже. Выберите предметы подешевле.'
+                    : 'Цели появятся после выбора предметов из инвентаря.'}
                 </div>
               </div>
             )}
@@ -3840,8 +3915,12 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                       {result.won ? 'Апгрейд успешен' : 'Апгрейд не удался'}
                     </div>
                     <div className="mt-0.5 truncate text-[9px] text-white/38">
-                      {result.won ? result.targetSkin.name : `${result.baseSkin.name} сгорел`} · шанс{' '}
-                      {result.chance.toFixed(2)}%
+                      {result.won
+                        ? result.targetSkin.name
+                        : resultBaseSkins.length > 1
+                          ? `${resultBaseSkins.length} предмета сгорели`
+                          : `${result.baseSkin?.name || 'Предмет'} сгорел`}{' '}
+                      · шанс {result.chance.toFixed(2)}%
                       {result.boost > 0 ? ` · доплата ${formatPrice(result.boost)}` : ''}
                     </div>
                   </div>
@@ -3854,14 +3933,14 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                     )}
                   >
                     {result.won
-                      ? `+${formatPrice(result.targetSkin.price - result.baseSkin.price - (result.boost || 0))}`
-                      : `−${formatPrice(result.baseSkin.price + (result.boost || 0))}`}
+                      ? `+${formatPrice(result.targetSkin.price - resultBaseTotal - (result.boost || 0))}`
+                      : `−${formatPrice(resultBaseTotal + (result.boost || 0))}`}
                   </span>
                 </div>
                 {!result.won && result.compensation > 0 && (
                   <div className="flex items-center justify-between gap-2 border-t border-[#ff6d85]/15 px-3 py-2">
                     <span className="text-[8px] font-bold uppercase tracking-[0.08em] text-[#ffb3c0]/70">
-                      Компенсация 5–10% от сгоревшего скина
+                      Компенсация 5–10% от сгоревших предметов
                     </span>
                     <span className="text-[9px] font-black tabular-nums text-acid">
                       +{formatPrice(result.compensation)}
@@ -3874,9 +3953,9 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
             <div className="mt-4 flex items-start gap-2 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-[8px] leading-relaxed text-white/27">
               <Icon name="shield" size={12} className="mt-0.5 shrink-0 text-acid/40" />
               <span>
-                При успехе исходный скин заменяется целью. При неудаче скин сгорает, но 5–10% его стоимости
-                возвращается на баланс. Доплата списывается в любом случае. Итоговый шанс и результат
-                генерируются на бэкенде STAND GRADE.
+                Можно объединить до 7 предметов. При успехе они заменяются целью, при неудаче сгорают, но
+                5–10% их суммарной стоимости возвращается на баланс. Доплата списывается в любом случае.
+                Итоговый шанс и результат генерируются на бэкенде STAND GRADE.
               </span>
             </div>
           </div>
@@ -6261,6 +6340,10 @@ function HistoryModal({ token, onClose, onToast }) {
                 upgradeEntries.map((entry) => {
                   const baseMeta = RARITY[entry.baseSkin?.rarity] || RARITY.Common
                   const targetMeta = RARITY[entry.targetSkin?.rarity] || RARITY.Common
+                  const baseCount = entry.baseSkins?.length || 1
+                  const baseTotal =
+                    entry.baseTotal ??
+                    Math.round((entry.baseSkin?.price || 0) * 100) / 100
                   return (
                     <div
                       key={entry.id}
@@ -6279,6 +6362,11 @@ function HistoryModal({ token, onClose, onToast }) {
                             {entry.baseSkin && (
                               <SkinVisual skin={entry.baseSkin} className="h-full w-full" showRarity={false} />
                             )}
+                            {baseCount > 1 && (
+                              <span className="absolute bottom-0 right-0 rounded-tl bg-acid px-1 text-[8px] font-black text-[#041007]">
+                                +{baseCount - 1}
+                              </span>
+                            )}
                           </div>
                           <Icon name="arrowRight" size={11} className="shrink-0 text-white/20" />
                           <div
@@ -6291,7 +6379,9 @@ function HistoryModal({ token, onClose, onToast }) {
                           </div>
                           <div className="min-w-0">
                             <div className="truncate text-[9px] font-bold text-white/70">
-                              {entry.baseSkin?.name || '—'}
+                              {baseCount > 1
+                                ? `${baseCount} ${plural(baseCount, ['предмет', 'предмета', 'предметов'])} · ${formatPrice(baseTotal)}`
+                                : entry.baseSkin?.name || '—'}
                             </div>
                             <div className="truncate text-[8px] font-semibold text-white/30">
                               → {entry.targetSkin?.name || '—'}

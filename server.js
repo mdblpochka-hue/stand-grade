@@ -28,6 +28,7 @@ const OWNER_START_BALANCE = Number(process.env.OWNER_START_BALANCE || 500000)
 const UPGRADE_EDGE = 0.9
 const COMPENSATION_MIN = 0.05
 const COMPENSATION_MAX = 0.1
+const UPGRADE_MAX_ITEMS = 7
 const PROMO_MAX_AMOUNT = 1000000
 const PROMO_MAX_USES = 100000
 const PROMO_MAX_PERCENT = 100
@@ -1749,24 +1750,49 @@ app.post('/api/promos/activate', auth, (req, res) => {
 })
 
 app.post('/api/upgrade', auth, (req, res) => {
-  const instanceId = String(req.body?.instanceId || '')
   const targetSkinId = String(req.body?.targetSkinId || '')
   const user = req.user
+  const rawIds = Array.isArray(req.body?.instanceIds)
+    ? req.body.instanceIds.map(String)
+    : [String(req.body?.instanceId || '')].filter(Boolean)
+  const instanceIds = [...new Set(rawIds)]
 
-  const index = user.inventory.findIndex((item) => item.instanceId === instanceId)
-  if (index === -1) return sendError(res, 404, 'ITEM_NOT_FOUND', 'Выберите скин из инвентаря')
+  if (!instanceIds.length) {
+    return sendError(res, 400, 'ITEM_NOT_FOUND', 'Выберите хотя бы один скин из инвентаря')
+  }
+  if (instanceIds.length > UPGRADE_MAX_ITEMS) {
+    return sendError(
+      res,
+      400,
+      'TOO_MANY_ITEMS',
+      `В одном апгрейде можно использовать до ${UPGRADE_MAX_ITEMS} предметов`,
+    )
+  }
+  if (instanceIds.length !== rawIds.length) {
+    return sendError(res, 400, 'DUPLICATE_ITEMS', 'Один и тот же предмет выбран дважды')
+  }
 
-  const baseEntry = user.inventory[index]
-  const baseSkin = SKIN_BY_ID.get(baseEntry.skinId)
+  const entries = instanceIds.map((instanceId) =>
+    user.inventory.find((item) => item.instanceId === instanceId),
+  )
+  if (entries.some((entry) => !entry)) {
+    return sendError(res, 404, 'ITEM_NOT_FOUND', 'Выберите скин из инвентаря')
+  }
+
+  const baseSkins = entries.map((entry) => SKIN_BY_ID.get(entry.skinId))
   const targetSkin = SKIN_BY_ID.get(targetSkinId)
-  if (!baseSkin || !targetSkin) return sendError(res, 404, 'SKIN_NOT_FOUND', 'Скин не найден')
-  if (targetSkin.price <= baseSkin.price) {
-    return sendError(res, 400, 'BAD_TARGET', 'Цель должна быть дороже исходного скина')
+  if (baseSkins.some((skin) => !skin) || !targetSkin) {
+    return sendError(res, 404, 'SKIN_NOT_FOUND', 'Скин не найден')
+  }
+
+  const baseTotal = roundGold(baseSkins.reduce((sum, skin) => sum + skin.price, 0))
+  if (targetSkin.price <= baseTotal) {
+    return sendError(res, 400, 'BAD_TARGET', 'Цель должна быть дороже выбранных предметов')
   }
 
   // Доплата из баланса повышает эффективную стоимость апгрейда.
-  // Шанс = (стоимость скина + доплата) / цель × 90%, но не выше 90%.
-  const maxUsefulBoost = Math.max(0, roundGold(targetSkin.price * UPGRADE_EDGE - baseSkin.price))
+  // Шанс = (сумма предметов + доплата) / цель × 90%, но не выше 90%.
+  const maxUsefulBoost = Math.max(0, roundGold(targetSkin.price * UPGRADE_EDGE - baseTotal))
   const requestedBoost = Math.max(0, Number(req.body?.boost) || 0)
   const boost = roundGold(Math.min(requestedBoost, maxUsefulBoost))
 
@@ -1779,12 +1805,13 @@ app.post('/api/upgrade', auth, (req, res) => {
 
   const chance = Math.min(
     90,
-    Math.max(1, Math.round(((baseSkin.price + boost) / targetSkin.price) * 90 * 100) / 100),
+    Math.max(1, Math.round(((baseTotal + boost) / targetSkin.price) * 90 * 100) / 100),
   )
   const roll = crypto.randomInt(0, 10000) / 100
   const won = roll < chance
 
-  user.inventory.splice(index, 1)
+  const consumed = new Set(instanceIds)
+  user.inventory = user.inventory.filter((entry) => !consumed.has(entry.instanceId))
   if (boost > 0) user.balance = roundGold(user.balance - boost)
 
   let wonItem = null
@@ -1795,9 +1822,9 @@ app.post('/api/upgrade', auth, (req, res) => {
     wonItem = { ...targetSkin, instanceId: entry.instanceId, obtainedAt: entry.obtainedAt }
     pushLiveDrop(user, targetSkin, 'upgrade')
   } else {
-    // Утешительная компенсация: 5–10% от стоимости сгоревшего скина.
+    // Утешительная компенсация: 5–10% от суммы сгоревших предметов.
     const rate = COMPENSATION_MIN + crypto.randomInt(0, 501) / 10000
-    compensation = roundGold(baseSkin.price * rate)
+    compensation = roundGold(baseTotal * rate)
     user.balance = roundGold(user.balance + compensation)
   }
 
@@ -1806,11 +1833,13 @@ app.post('/api/upgrade', auth, (req, res) => {
     chance,
     boost,
     compensation,
-    baseSkin: { ...baseSkin },
+    baseSkin: { ...baseSkins[0] },
+    baseSkins: baseSkins.map((skin) => ({ ...skin })),
+    baseTotal,
     targetSkin: { ...targetSkin },
     profit: won
-      ? roundGold(targetSkin.price - baseSkin.price - boost)
-      : -roundGold(baseSkin.price + boost - compensation),
+      ? roundGold(targetSkin.price - baseTotal - boost)
+      : -roundGold(baseTotal + boost - compensation),
   })
   saveState()
 
@@ -1821,7 +1850,9 @@ app.post('/api/upgrade', auth, (req, res) => {
     boost,
     compensation,
     roll,
-    baseSkin,
+    baseSkin: baseSkins[0],
+    baseSkins,
+    baseTotal,
     targetSkin,
     wonItem,
     user: publicUser(user),
