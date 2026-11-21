@@ -14,7 +14,6 @@ import {
   playUpgradeResult,
   setSoundEnabled,
   startSpinSound,
-  startUpgradeTickSound,
   unlockAudio,
 } from './sound'
 
@@ -43,8 +42,6 @@ const ANIM_MS_FAST = 500
 const UPGRADE_EDGE = 0.9
 const UPGRADE_MAX_ITEMS = 7
 const REEL_EASING = 'cubic-bezier(.52,.02,.08,1)'
-// Спокойное колесо апгрейда: плавный разгон, умеренная скорость и плавное затухание.
-const UPGRADE_EASING = 'cubic-bezier(.42,0,.58,1)'
 const WINNER_INDEX = 34
 const OPEN_COUNTS = [1, 2, 3, 4, 5, 10]
 
@@ -3184,9 +3181,9 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
     needle.style.transition = 'none'
     needle.style.transform = 'rotate(0deg)'
     void needle.offsetWidth
-    const stopSound = startUpgradeTickSound(needle, duration)
+    const stopSound = startSpinSound(duration, 'upgrade')
     const frame = requestAnimationFrame(() => {
-      needle.style.transition = `transform ${duration}ms ${UPGRADE_EASING}`
+      needle.style.transition = `transform ${duration}ms ${REEL_EASING}`
       needle.style.transform = `rotate(${spin.angle}deg)`
     })
     const timer = setTimeout(() => {
@@ -3314,7 +3311,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
       const won = Boolean(data.won)
       const sectorSize = won ? winDeg : 360 - winDeg
       const landing = (won ? 0 : winDeg) + sectorSize * (0.18 + Math.random() * 0.64)
-      setSpin({ angle: 360 * (fast ? 2 : 4) + landing, data })
+      setSpin({ angle: 360 * (fast ? 2 : 6) + landing, data })
     } catch (requestError) {
       setError(requestError.message)
       setUpgrading(false)
