@@ -3918,7 +3918,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                       {result.won
                         ? result.targetSkin.name
                         : resultBaseSkins.length > 1
-                          ? `${resultBaseSkins.length} предмета сгорели`
+                          ? `${resultBaseSkins.length} ${plural(resultBaseSkins.length, ['предмет', 'предмета', 'предметов'])} сгорели`
                           : `${result.baseSkin?.name || 'Предмет'} сгорел`}{' '}
                       · шанс {result.chance.toFixed(2)}%
                       {result.boost > 0 ? ` · доплата ${formatPrice(result.boost)}` : ''}
