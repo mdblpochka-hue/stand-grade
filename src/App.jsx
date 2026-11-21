@@ -4073,12 +4073,14 @@ const INVENTORY_FILTERS = [
   { id: 'knives', label: 'Ножи' },
 ]
 
-function InventorySection({ user, onSell, onWithdraw }) {
+function InventorySection({ user, onSell, onSellMany, onWithdraw }) {
   const [filter, setFilter] = useState('all')
   const [sort, setSort] = useState('desc')
   const [minPrice, setMinPrice] = useState('')
   const [maxPrice, setMaxPrice] = useState('')
   const [sellingId, setSellingId] = useState(null)
+  const [sellingAll, setSellingAll] = useState(false)
+  const [confirmSellAll, setConfirmSellAll] = useState(false)
 
   const items = useMemo(() => {
     const min = minPrice ? Number(minPrice) : 0
@@ -4101,12 +4103,23 @@ function InventorySection({ user, onSell, onWithdraw }) {
   const totalValue = user.inventory.reduce((sum, item) => sum + item.price, 0)
 
   async function sell(item) {
-    if (sellingId) return
+    if (sellingId || sellingAll) return
     setSellingId(item.instanceId)
     try {
       await onSell(item)
     } finally {
       setSellingId(null)
+    }
+  }
+
+  async function sellAll() {
+    if (sellingAll || !user.inventory.length) return
+    setSellingAll(true)
+    try {
+      await onSellMany()
+    } finally {
+      setSellingAll(false)
+      setConfirmSellAll(false)
     }
   }
 
@@ -4168,10 +4181,49 @@ function InventorySection({ user, onSell, onWithdraw }) {
             onMinPriceChange={setMinPrice}
             onMaxPriceChange={setMaxPrice}
           />
-          <span className="text-[8px] font-semibold text-white/24">
-            Показано {items.length} из {user.inventory.length}
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[8px] font-semibold text-white/24">
+              Показано {items.length} из {user.inventory.length}
+            </span>
+            <button
+              type="button"
+              onClick={() => setConfirmSellAll(true)}
+              disabled={!user.inventory.length || sellingAll || Boolean(sellingId)}
+              className="flex items-center gap-1.5 rounded-lg border border-[#ff5d7a]/25 bg-[#ff5d7a]/[0.07] px-3 py-2 text-[9px] font-extrabold text-[#ff9aac] transition hover:border-[#ff5d7a]/40 hover:bg-[#ff5d7a]/[0.12] disabled:cursor-not-allowed disabled:opacity-35"
+            >
+              <Icon name="tag" size={12} />
+              Продать всё
+            </button>
+          </div>
         </div>
+
+        {confirmSellAll && (
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#ff5d7a]/25 bg-[#ff5d7a]/[0.06] px-3 py-2.5">
+            <span className="text-[9px] font-semibold leading-relaxed text-[#ffb3c0]">
+              Продать весь инвентарь: {user.inventory.length}{' '}
+              {plural(user.inventory.length, ['предмет', 'предмета', 'предметов'])} за{' '}
+              <span className="font-black tabular-nums text-white">{formatGold(totalValue)}</span>?
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={sellAll}
+                disabled={sellingAll}
+                className="rounded-lg border border-[#ff5d7a]/35 bg-[#ff5d7a]/[0.12] px-3 py-2 text-[9px] font-black uppercase tracking-[0.06em] text-[#ff9aac] transition hover:bg-[#ff5d7a]/20 disabled:opacity-40"
+              >
+                {sellingAll ? 'Продаём...' : 'Да, продать'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmSellAll(false)}
+                disabled={sellingAll}
+                className="rounded-lg border border-white/[0.08] px-3 py-2 text-[9px] font-bold text-white/40 transition hover:text-white disabled:opacity-40"
+              >
+                Отмена
+              </button>
+            </div>
+          </div>
+        )}
 
         {items.length ? (
           <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
@@ -6933,6 +6985,23 @@ export default function App() {
     }
   }
 
+  async function sellAllItems() {
+    if (!token || !user.inventory.length) return
+    try {
+      const data = await apiRequest('/api/sell-many', {
+        method: 'POST',
+        token,
+        body: { instanceIds: user.inventory.map((item) => item.instanceId) },
+      })
+      applyUpdate(data)
+      playCoin()
+      pushToast(data.message, 'success')
+    } catch (error) {
+      pushToast(error.message, 'error')
+      if (error.data?.user) applyUpdate(error.data)
+    }
+  }
+
   function navigate(target) {
     if (!SECTION_IDS.includes(target)) return
     if (target === 'promos' && token && unseenPromos > 0) {
@@ -7059,6 +7128,7 @@ export default function App() {
             <InventorySection
               user={user}
               onSell={sellItem}
+              onSellMany={sellAllItems}
               onWithdraw={(item) => setWithdrawSkin(item)}
             />
           )}
