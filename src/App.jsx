@@ -3741,18 +3741,6 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                 </div>
               )}
 
-              {shopOpen && (
-                <UpgradeShop
-                  catalog={catalog}
-                  balance={user.balance}
-                  token={token}
-                  onUpdate={onUpdate}
-                  onToast={onToast}
-                  onBought={handleShopBought}
-                  onClose={() => setShopOpen(false)}
-                />
-              )}
-
               <div className="mt-4 grid grid-cols-2 items-stretch gap-2 sm:mt-5 sm:gap-3 md:grid-cols-[minmax(0,1fr)_260px_minmax(0,1fr)] md:items-center md:gap-4">
                 <div className="min-w-0 md:col-start-1 md:row-start-1">
                   <div className="mb-1.5 flex items-center justify-between gap-1">
@@ -4316,6 +4304,18 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
           </div>
         </div>
       </div>
+
+      {shopOpen && (
+        <UpgradeShop
+          catalog={catalog}
+          balance={user.balance}
+          token={token}
+          onUpdate={onUpdate}
+          onToast={onToast}
+          onBought={handleShopBought}
+          onClose={() => setShopOpen(false)}
+        />
+      )}
     </section>
   )
 }
