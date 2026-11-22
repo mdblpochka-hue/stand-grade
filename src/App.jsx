@@ -3300,7 +3300,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
   const [targetMinPrice, setTargetMinPrice] = useState('')
   const [targetMaxPrice, setTargetMaxPrice] = useState('')
   const [targetLimit, setTargetLimit] = useState(120)
-  const [shopOpen, setShopOpen] = useState(false)
+  const [shopOpen, setShopOpen] = useState(true)
   const [spin, setSpin] = useState(null)
   const needleRef = useRef(null)
   const duration = fast ? ANIM_MS_FAST : ANIM_MS_NORMAL
