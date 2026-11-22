@@ -3,6 +3,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import pg from 'pg'
 import { STANDOFFCRAFT_META, STANDOFFCRAFT_SKINS } from './server-data/standoffcraft.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -15,6 +16,18 @@ const DATA_DIR = process.env.DATA_DIR
   : path.join(__dirname, 'data')
 const DB_PATH = path.join(DATA_DIR, 'store.json')
 const SECRET_PATH = path.join(DATA_DIR, 'session.secret')
+
+// Необязательная внешняя БД. На бесплатном Render файловая система
+// эфемерная, поэтому для сохранения данных между деплоями нужен Postgres
+// (например, бесплатный Neon/Supabase). Без DATABASE_URL работает JSON-файл.
+const DATABASE_URL = String(process.env.DATABASE_URL || '').trim()
+const dbPool = DATABASE_URL
+  ? new pg.Pool({
+      connectionString: DATABASE_URL,
+      ssl: /localhost|127\.0\.0\.1/i.test(DATABASE_URL) ? false : { rejectUnauthorized: false },
+      max: 4,
+    })
+  : null
 
 // Папка данных может отсутствовать на чистом хостинге — создаём заранее.
 fs.mkdirSync(DATA_DIR, { recursive: true })
@@ -917,27 +930,107 @@ function migrateUser(user) {
   return user
 }
 
+function normalizeState(parsed) {
+  if (typeof parsed === 'string') {
+    try {
+      parsed = JSON.parse(parsed)
+    } catch {
+      return defaultState()
+    }
+  }
+  if (!parsed || typeof parsed !== 'object' || !parsed.users) return defaultState()
+  if (!parsed.users.player) parsed.users.player = makeSeedUser('player', PLAYER_PASSWORD, 'player', 100)
+  if (!parsed.users.admin) parsed.users.admin = makeSeedUser('admin', ADMIN_PASSWORD, 'admin', ADMIN_START_BALANCE)
+  if (!parsed.users.owner) parsed.users.owner = makeSeedUser('owner', OWNER_PASSWORD, 'owner', OWNER_START_BALANCE)
+  Object.values(parsed.users).forEach(migrateUser)
+  if (!Array.isArray(parsed.promos)) parsed.promos = defaultPromos()
+  parsed.dailyDistributed = Number(parsed.dailyDistributed) || 0
+  parsed.version = 3
+  return parsed
+}
+
 function loadState() {
   try {
-    const parsed = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'))
-    if (!parsed || typeof parsed !== 'object' || !parsed.users) return defaultState()
-    if (!parsed.users.player) parsed.users.player = makeSeedUser('player', PLAYER_PASSWORD, 'player', 100)
-    if (!parsed.users.admin) parsed.users.admin = makeSeedUser('admin', ADMIN_PASSWORD, 'admin', ADMIN_START_BALANCE)
-    if (!parsed.users.owner) parsed.users.owner = makeSeedUser('owner', OWNER_PASSWORD, 'owner', OWNER_START_BALANCE)
-    Object.values(parsed.users).forEach(migrateUser)
-    if (!Array.isArray(parsed.promos)) parsed.promos = defaultPromos()
-    parsed.dailyDistributed = Number(parsed.dailyDistributed) || 0
-    parsed.version = 3
-    return parsed
+    return normalizeState(JSON.parse(fs.readFileSync(DB_PATH, 'utf8')))
   } catch {
     return defaultState()
   }
 }
 
-let state = loadState()
+const REMOTE_TABLE = 'stand_grade_state'
+
+async function loadRemoteState() {
+  if (!dbPool) return null
+  await dbPool.query(`
+    CREATE TABLE IF NOT EXISTS ${REMOTE_TABLE} (
+      id SMALLINT PRIMARY KEY,
+      data JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `)
+  const result = await dbPool.query(`SELECT data FROM ${REMOTE_TABLE} WHERE id = 1`)
+  return result.rows[0]?.data || null
+}
+
+async function saveRemoteState(snapshot) {
+  if (!dbPool) return
+  await dbPool.query(
+    `INSERT INTO ${REMOTE_TABLE} (id, data, updated_at)
+     VALUES (1, $1::jsonb, now())
+     ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
+    [snapshot],
+  )
+}
+
+let state
+if (dbPool) {
+  const remote = await loadRemoteState()
+  state = normalizeState(remote)
+  if (!remote || !remote.users) {
+    await saveRemoteState(JSON.stringify(state))
+  }
+  console.log('Persistence: PostgreSQL (DATABASE_URL)')
+} else {
+  state = loadState()
+  console.log('Persistence: local JSON (ephemeral on Render free plan)')
+}
+
+let saveTimer = null
+let saveQueue = Promise.resolve()
 
 function saveState() {
-  fs.writeFileSync(DB_PATH, JSON.stringify(state, null, 2))
+  try {
+    fs.writeFileSync(DB_PATH, JSON.stringify(state, null, 2))
+  } catch (error) {
+    console.error('Local state save failed:', error.message)
+  }
+
+  if (!dbPool) return
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = setTimeout(() => {
+    saveTimer = null
+    const snapshot = JSON.stringify(state)
+    saveQueue = saveQueue
+      .then(() => saveRemoteState(snapshot))
+      .catch((error) => console.error('PostgreSQL save failed:', error.message))
+  }, 250)
+}
+
+async function flushState() {
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+    const snapshot = JSON.stringify(state)
+    saveQueue = saveQueue.then(() => saveRemoteState(snapshot))
+  }
+  await saveQueue.catch(() => {})
+  if (dbPool) await dbPool.end().catch(() => {})
+}
+
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, () => {
+    flushState().finally(() => process.exit(0))
+  })
 }
 
 function loadSessionSecret() {
@@ -1411,7 +1504,13 @@ function sendError(res, status, code, message, extra = {}) {
 }
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, service: 'stand-grade-demo', online: onlineCount(), time: new Date().toISOString() })
+  res.json({
+    ok: true,
+    service: 'stand-grade-demo',
+    persistence: dbPool ? 'postgres' : 'file',
+    online: onlineCount(),
+    time: new Date().toISOString(),
+  })
 })
 
 app.get('/api/online', (_req, res) => {

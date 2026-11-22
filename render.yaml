@@ -23,3 +23,7 @@ services:
         sync: false
       - key: OWNER_START_BALANCE
         value: "500000"
+      # Подключите бесплатный Neon/Supabase Postgres, чтобы балансы,
+      # инвентарь и промокоды сохранялись между деплоями.
+      - key: DATABASE_URL
+        sync: false

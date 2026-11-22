@@ -11,6 +11,7 @@
 | `PORT` | выдаёт хостинг | Порт HTTP-сервера (локально по умолчанию `3001`). |
 | `SESSION_SECRET` | да, на проде | Секрет подписи токенов. Длинная случайная строка. |
 | `DATA_DIR` | желательно | Папка для `store.json` и `session.secret` (на Render — `/var/data`). |
+| `DATABASE_URL` | для сохранения данных | Postgres для хранения аккаунтов между деплоями. Без него используется JSON-файл. |
 | `PLAYER_PASSWORD` | нет | Пароль `player` при первом создании базы (по умолчанию `player`). |
 | `ADMIN_PASSWORD` | нет | Пароль `admin` при первом создании базы (по умолчанию `rainy`). |
 | `ADMIN_START_BALANCE` | нет | Стартовый баланс админа (по умолчанию `100000`). |
@@ -35,11 +36,30 @@ node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
    - **Build Command:** `npm ci && npm run build`
    - **Start Command:** `npm start`
    - **Health Check Path:** `/api/health`
-3. Environment → добавь `SESSION_SECRET` (Generate), `DATA_DIR=/var/data`,
-   при желании `PLAYER_PASSWORD` и `ADMIN_PASSWORD`.
-4. **Disk** (только платный план): mount path `/var/data`, 1 GB.
-   Без диска данные живут в эфемерной ФС и сбрасываются при рестарте/деплое.
-5. Deploy. Приложение будет доступно по адресу `https://<service>.onrender.com`.
+3. Environment → добавь `SESSION_SECRET` (Generate), `DATABASE_URL`
+   (см. раздел «Сохранение данных»), при желании `PLAYER_PASSWORD` и `ADMIN_PASSWORD`.
+4. Deploy. Приложение будет доступно по адресу `https://<service>.onrender.com`.
+
+### Сохранение данных между деплоями
+
+На бесплатном Render файловая система эфемерная: `store.json` сбрасывается
+при каждом деплое и рестарте. Чтобы балансы, инвентарь и промокоды сохранялись,
+подключите внешний Postgres:
+
+1. Создай бесплатную базу в [Neon](https://neon.tech) или Supabase.
+2. Скопируй строку подключения вида
+   `postgresql://user:password@host/db?sslmode=require`.
+3. В Render → Environment добавь `DATABASE_URL` с этой строкой.
+4. Передеплой приложение.
+
+При старте сервер сам создаст таблицу `stand_grade_state`, загрузит из неё
+состояние и будет сохранять каждое изменение. `/api/health` покажет
+`"persistence":"postgres"` — значит, данные переживут следующий деплой.
+Первый запуск с пустой БД создаст аккаунты заново; текущее эфемерное
+состояние Render автоматически не переносится.
+
+Альтернатива для платного Render: подключить **Disk** с mount path `/var/data`
+и задать `DATA_DIR=/var/data` — тогда достаточно JSON-файла.
 
 ## Vercel
 
