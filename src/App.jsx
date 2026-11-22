@@ -1623,6 +1623,220 @@ function PriceSortControls({
   )
 }
 
+function UpgradeShop({ catalog, balance, token, onUpdate, onToast, onBought, onClose }) {
+  const [query, setQuery] = useState('')
+  const [rarity, setRarity] = useState('all')
+  const [sort, setSort] = useState('asc')
+  const [minPrice, setMinPrice] = useState('')
+  const [maxPrice, setMaxPrice] = useState('')
+  const [visibleCount, setVisibleCount] = useState(24)
+  const [buying, setBuying] = useState(null)
+
+  const items = useMemo(() => {
+    const normalized = query.trim().toLowerCase()
+    const min = minPrice ? Number(minPrice) : 0
+    const max = maxPrice ? Number(maxPrice) : Infinity
+    return catalog
+      .filter((skin) => skin.price >= min && skin.price <= max)
+      .filter((skin) => rarity === 'all' || skin.rarity === rarity)
+      .filter(
+        (skin) =>
+          !normalized ||
+          skin.name.toLowerCase().includes(normalized) ||
+          String(skin.weapon || '').toLowerCase().includes(normalized),
+      )
+      .sort((a, b) => (sort === 'asc' ? a.price - b.price : b.price - a.price))
+  }, [catalog, query, rarity, sort, minPrice, maxPrice])
+
+  useEffect(() => {
+    setVisibleCount(24)
+  }, [query, rarity, sort, minPrice, maxPrice])
+
+  async function buy(skin) {
+    if (buying) return
+    setBuying(skin.id)
+    try {
+      const data = await apiRequest('/api/buy-skin', {
+        method: 'POST',
+        token,
+        body: { skinId: skin.id },
+      })
+      onUpdate(data)
+      onToast(data.message, 'success')
+      if (data.bought) onBought?.(data.bought)
+    } catch (requestError) {
+      onToast(requestError.message, 'error')
+      if (requestError.data?.user) onUpdate(requestError.data)
+    } finally {
+      setBuying(null)
+    }
+  }
+
+  const visible = items.slice(0, visibleCount)
+
+  return (
+    <div className="mt-4 rounded-2xl border border-white/[0.08] bg-white/[0.02] p-3 sm:p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-acid/20 bg-acid/[0.07] text-acid">
+            <Icon name="bag" size={15} />
+          </span>
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.12em] text-white/70">
+              Магазин для апгрейда
+            </div>
+            <div className="text-[8px] font-semibold text-white/28">
+              Купленный предмет сразу добавится в инвентарь и в выбор
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="flex h-8 items-center gap-1.5 rounded-lg border border-acid/15 bg-acid/[0.05] px-2.5 text-[10px] font-extrabold tabular-nums text-acid">
+            <Icon name="coin" size={11} />
+            {formatGold(balance)}
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-8 items-center gap-1.5 rounded-lg border border-white/[0.09] px-2.5 text-[8px] font-black uppercase tracking-[0.06em] text-white/40 transition hover:text-white"
+          >
+            <Icon name="x" size={12} />
+            Скрыть
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-col gap-2 lg:flex-row lg:items-center">
+        <div className="relative min-w-0 flex-1">
+          <Icon
+            name="search"
+            size={13}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/24"
+          />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Найти скин или оружие..."
+            className="h-9 w-full rounded-lg border border-white/[0.08] bg-black/25 pl-8 pr-3 text-[9px] font-semibold text-white placeholder:text-white/20 focus:border-acid/40 focus:outline-none"
+          />
+        </div>
+        <div className="no-scrollbar flex gap-1.5 overflow-x-auto">
+          <button
+            type="button"
+            onClick={() => setRarity('all')}
+            className={cx(
+              'shrink-0 rounded-lg border px-2.5 py-1.5 text-[8px] font-extrabold transition',
+              rarity === 'all'
+                ? 'border-acid/30 bg-acid/10 text-acid'
+                : 'border-white/[0.07] bg-white/[0.02] text-white/32 hover:text-white/60',
+            )}
+          >
+            Все
+          </button>
+          {RARITY_ORDER.map((value) => {
+            const meta = RARITY[value]
+            return (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setRarity(value)}
+                className={cx(
+                  'shrink-0 rounded-lg border px-2.5 py-1.5 text-[8px] font-extrabold transition',
+                  rarity === value
+                    ? 'bg-white/[0.06] text-white'
+                    : 'border-white/[0.07] bg-white/[0.02] text-white/32 hover:text-white/60',
+                )}
+                style={
+                  rarity === value
+                    ? { borderColor: `${meta.color}45`, color: meta.color }
+                    : undefined
+                }
+              >
+                {meta.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <PriceSortControls
+        sort={sort}
+        onSortChange={setSort}
+        minPrice={minPrice}
+        maxPrice={maxPrice}
+        onMinPriceChange={setMinPrice}
+        onMaxPriceChange={setMaxPrice}
+        className="mt-2"
+      />
+
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+        {visible.map((skin) => {
+          const meta = RARITY[skin.rarity] || RARITY.Common
+          const affordable = balance + 1e-9 >= skin.price
+          const isBuying = buying === skin.id
+          return (
+            <article
+              key={skin.id}
+              className="overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.02]"
+            >
+              <SkinVisual skin={skin} className="h-20 w-full" showRarity={false} />
+              <div className="p-2">
+                <div className="truncate text-[9px] font-extrabold text-white/85">{skin.name}</div>
+                <div className="mt-0.5 truncate text-[8px] font-semibold text-white/25">{skin.weapon}</div>
+                <div className="mt-2 flex items-center justify-between gap-1">
+                  <span className="text-[9px] font-extrabold tabular-nums" style={{ color: meta.color }}>
+                    {formatPrice(skin.price)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => buy(skin)}
+                    disabled={!affordable || Boolean(buying)}
+                    className={cx(
+                      'flex items-center gap-1 rounded-md border px-1.5 py-1 text-[8px] font-extrabold transition',
+                      affordable
+                        ? 'border-acid/25 bg-acid/[0.08] text-acid hover:bg-acid hover:text-[#041007]'
+                        : 'cursor-not-allowed border-white/[0.06] bg-white/[0.02] text-white/20',
+                      buying && !isBuying && 'opacity-30',
+                    )}
+                  >
+                    {isBuying ? (
+                      <span className="spin-ring h-3 w-3 rounded-full border-2 border-current/30 border-t-current" />
+                    ) : (
+                      <Icon name={affordable ? 'plus' : 'lock'} size={10} />
+                    )}
+                    {affordable ? 'Купить' : 'Мало G'}
+                  </button>
+                </div>
+              </div>
+            </article>
+          )
+        })}
+      </div>
+
+      {!items.length && (
+        <div className="mt-3 rounded-xl border border-dashed border-white/[0.08] px-4 py-8 text-center text-[9px] font-semibold text-white/30">
+          Ничего не найдено. Измените запрос или фильтр.
+        </div>
+      )}
+
+      {items.length > visibleCount && (
+        <div className="mt-3 flex flex-col items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setVisibleCount((value) => value + 24)}
+            className="rounded-lg border border-acid/25 bg-acid/[0.07] px-4 py-2 text-[8px] font-black uppercase tracking-[0.06em] text-acid transition hover:bg-acid/[0.14]"
+          >
+            Показать ещё 24
+          </button>
+          <span className="text-[8px] font-semibold text-white/22">
+            Показано {Math.min(visibleCount, items.length)} из {items.length}
+          </span>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function CasesSection({ cases, onOpen, user, now }) {
   return (
     <section id="cases" className="pt-10 sm:pt-14">
@@ -3080,6 +3294,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
   const [targetMinPrice, setTargetMinPrice] = useState('')
   const [targetMaxPrice, setTargetMaxPrice] = useState('')
   const [targetLimit, setTargetLimit] = useState(120)
+  const [shopOpen, setShopOpen] = useState(false)
   const [spin, setSpin] = useState(null)
   const needleRef = useRef(null)
   const duration = fast ? ANIM_MS_FAST : ANIM_MS_NORMAL
@@ -3229,6 +3444,22 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
     setCustomChance('')
     setTargetQuery('')
     setTargetLimit(120)
+    setResult(null)
+    setError('')
+    resetWheel()
+  }
+
+  function handleShopBought(item) {
+    if (!item?.instanceId) return
+    if (baseIds.includes(item.instanceId)) return
+    if (baseIds.length >= UPGRADE_MAX_ITEMS) {
+      onToast(`Куплено. В апгрейде уже максимум — ${UPGRADE_MAX_ITEMS} предметов`, 'info')
+      return
+    }
+    setBaseIds((previous) => [...previous, item.instanceId])
+    setTargetId(null)
+    setBoost(0)
+    setCustomChance('')
     setResult(null)
     setError('')
     resetWheel()
@@ -3413,7 +3644,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
             <div className="pointer-events-none absolute right-0 top-0 h-72 w-72 rounded-full bg-acid/[0.045] blur-3xl" />
 
             <div className="relative">
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <span className="flex h-5 w-5 items-center justify-center rounded-md border border-acid/20 bg-acid/[0.07] text-[9px] font-black text-acid">
                     1
@@ -3422,9 +3653,24 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                     Ваши скины
                   </span>
                 </div>
-                <span className="text-[9px] font-semibold text-white/24">
-                  {baseIds.length}/{UPGRADE_MAX_ITEMS} выбрано · {inventory.length} в инвентаре
-                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShopOpen((open) => !open)}
+                    className={cx(
+                      'flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[8px] font-black uppercase tracking-[0.05em] transition',
+                      shopOpen
+                        ? 'border-acid/35 bg-acid/10 text-acid'
+                        : 'border-white/[0.09] bg-white/[0.03] text-white/45 hover:border-acid/30 hover:text-acid',
+                    )}
+                  >
+                    <Icon name="bag" size={12} />
+                    {shopOpen ? 'Скрыть магазин' : 'Магазин'}
+                  </button>
+                  <span className="text-[9px] font-semibold text-white/24">
+                    {baseIds.length}/{UPGRADE_MAX_ITEMS} выбрано · {inventory.length} в инвентаре
+                  </span>
+                </div>
               </div>
 
               {inventory.length ? (
@@ -3493,6 +3739,18 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                     </button>
                   </div>
                 </div>
+              )}
+
+              {shopOpen && (
+                <UpgradeShop
+                  catalog={catalog}
+                  balance={user.balance}
+                  token={token}
+                  onUpdate={onUpdate}
+                  onToast={onToast}
+                  onBought={handleShopBought}
+                  onClose={() => setShopOpen(false)}
+                />
               )}
 
               <div className="mt-4 grid grid-cols-2 items-stretch gap-2 sm:mt-5 sm:gap-3 md:grid-cols-[minmax(0,1fr)_260px_minmax(0,1fr)] md:items-center md:gap-4">
