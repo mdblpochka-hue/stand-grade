@@ -985,8 +985,10 @@ async function saveRemoteState(snapshot) {
 let state
 if (dbPool) {
   const remote = await loadRemoteState()
-  state = normalizeState(remote)
-  if (!remote || !remote.users) {
+  // Если БД пустая, берём локальный store.json (удобно для миграции),
+  // иначе — данные из PostgreSQL.
+  state = remote?.users ? normalizeState(remote) : loadState()
+  if (!remote?.users) {
     await saveRemoteState(JSON.stringify(state))
   }
   console.log('Persistence: PostgreSQL (DATABASE_URL)')

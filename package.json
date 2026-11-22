@@ -14,7 +14,8 @@
     "build": "vite build",
     "start": "node server.js",
     "preview": "vite preview",
-    "sync:standoffcraft": "node scripts/sync-standoffcraft.mjs"
+    "sync:standoffcraft": "node scripts/sync-standoffcraft.mjs",
+    "db:import": "node scripts/migrate-store-to-postgres.mjs"
   },
   "dependencies": {
     "express": "^4.21.2",
