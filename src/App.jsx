@@ -2923,6 +2923,12 @@ function WinterSnow() {
   )
 }
 
+function isWinterSeason(date = new Date()) {
+  const month = date.getMonth()
+  const day = date.getDate()
+  return month === 10 || month === 11 || (month === 0 && day <= 15)
+}
+
 function WinterEventBar({ event, onNavigate }) {
   if (!event?.active) return null
   const endsAt = new Date(event.endsAt)
@@ -4951,6 +4957,7 @@ function LoginScreen({ onLogin, notice }) {
       <div className="absolute -right-40 top-1/3 h-[460px] w-[460px] rounded-full bg-lime/[0.055] blur-[120px]" />
       <div className="absolute bottom-[-220px] left-1/3 h-[420px] w-[520px] rounded-full bg-[#16ff9b]/[0.05] blur-[120px]" />
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-acid/50 to-transparent" />
+      {isWinterSeason() && <WinterSnow />}
 
       <div className="relative mx-auto grid min-h-screen max-w-[1320px] items-center gap-10 px-5 py-8 lg:grid-cols-[1.1fr_.9fr] lg:gap-16 lg:px-10">
         <div className="hidden lg:block">
