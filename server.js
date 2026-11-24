@@ -95,6 +95,17 @@ const CRAFT_MIN_ITEMS = 3
 const CRAFT_MAX_ITEMS = 10
 const CRAFT_PROFIT_CHANCE = 1 / 3
 const BATTLE_ROUND_OPTIONS = [1, 3, 5]
+// Rate limit: не больше N операций в минуту с одного IP.
+const RATE_LIMIT_API_PER_MIN = Math.max(30, Number(process.env.RATE_LIMIT_API_PER_MIN) || 180)
+const RATE_LIMIT_AUTH_PER_MIN = Math.max(3, Number(process.env.RATE_LIMIT_AUTH_PER_MIN) || 10)
+const RATE_LIMIT_REGISTER_PER_MIN = Math.max(
+  2,
+  Number(process.env.RATE_LIMIT_REGISTER_PER_MIN) || 5,
+)
+const RATE_LIMIT_ACTION_PER_MIN = Math.max(
+  10,
+  Number(process.env.RATE_LIMIT_ACTION_PER_MIN) || 60,
+)
 const BATTLE_NAMES = [
   'xKira',
   'NoScope',
@@ -1539,7 +1550,10 @@ function pushLiveDrop(user, skin, source = 'case') {
 /* ------------------------------------------------------------------ */
 
 const app = express()
-app.set('trust proxy', true)
+// На Render перед приложением один прокси. trust proxy = 1 заставляет Express
+// брать реальный IP из X-Forwarded-For, но не доверять подделанному левому значению.
+const TRUST_PROXY = Number(process.env.TRUST_PROXY || 1)
+app.set('trust proxy', Number.isFinite(TRUST_PROXY) ? TRUST_PROXY : 1)
 app.use(express.json({ limit: '64kb' }))
 
 app.use((req, res, next) => {
@@ -1554,6 +1568,103 @@ app.use((req, res, next) => {
 function sendError(res, status, code, message, extra = {}) {
   return res.status(status).json({ error: { code, message }, ...extra })
 }
+
+/* ------------------------------------------------------------------ */
+/*  Rate limit (per IP, fixed one-minute window)                      */
+/* ------------------------------------------------------------------ */
+
+function rateLimitKey(req) {
+  return req.ip || req.socket?.remoteAddress || 'unknown'
+}
+
+function createRateLimiter({ name, windowMs = 60_000, max }) {
+  const buckets = new Map()
+  let lastSweep = Date.now()
+
+  return function rateLimiter(req, res, next) {
+    if (req.method === 'OPTIONS') return next()
+
+    const now = Date.now()
+    if (now - lastSweep >= windowMs) {
+      for (const [key, bucket] of buckets) {
+        if (bucket.resetAt <= now) buckets.delete(key)
+      }
+      lastSweep = now
+    }
+
+    const key = `${name}:${rateLimitKey(req)}`
+    let bucket = buckets.get(key)
+    if (!bucket || bucket.resetAt <= now) {
+      bucket = { count: 0, resetAt: now + windowMs }
+      buckets.set(key, bucket)
+      // Не позволяем Map расти бесконечно при большом числе адресов.
+      if (buckets.size > 20_000) {
+        for (const [oldKey, oldBucket] of buckets) {
+          if (oldBucket.resetAt <= now) buckets.delete(oldKey)
+        }
+        while (buckets.size > 20_000) {
+          const oldestKey = buckets.keys().next().value
+          if (oldestKey === undefined) break
+          buckets.delete(oldestKey)
+        }
+      }
+    }
+
+    bucket.count += 1
+    const remaining = Math.max(0, max - bucket.count)
+    res.setHeader('X-RateLimit-Limit', String(max))
+    res.setHeader('X-RateLimit-Remaining', String(remaining))
+    res.setHeader('X-RateLimit-Reset', String(Math.ceil(bucket.resetAt / 1000)))
+
+    if (bucket.count > max) {
+      const retryAfter = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000))
+      res.setHeader('Retry-After', String(retryAfter))
+      return res.status(429).json({
+        error: {
+          code: 'RATE_LIMITED',
+          message: `Слишком много запросов. Попробуйте через ${retryAfter} сек.`,
+        },
+      })
+    }
+
+    return next()
+  }
+}
+
+const apiRateLimiter = createRateLimiter({ name: 'api', max: RATE_LIMIT_API_PER_MIN })
+const authRateLimiter = createRateLimiter({ name: 'auth', max: RATE_LIMIT_AUTH_PER_MIN })
+const registerRateLimiter = createRateLimiter({
+  name: 'register',
+  max: RATE_LIMIT_REGISTER_PER_MIN,
+})
+const actionRateLimiter = createRateLimiter({ name: 'action', max: RATE_LIMIT_ACTION_PER_MIN })
+
+// Общий лимит на все API-запросы, кроме health-check Render.
+app.use('/api', (req, res, next) => {
+  const pathOnly = String(req.originalUrl || '').split('?')[0]
+  if (pathOnly === '/api/health') return next()
+  return apiRateLimiter(req, res, next)
+})
+
+// Вход и регистрация — самые чувствительные к перебору.
+app.use('/api/login', authRateLimiter)
+app.use('/api/register', registerRateLimiter)
+
+// Дорогие игровые операции.
+app.use(
+  [
+    '/api/open-case',
+    '/api/upgrade',
+    '/api/craft',
+    '/api/case-battle',
+    '/api/buy-skin',
+    '/api/sell-skin',
+    '/api/sell-many',
+    '/api/deposit',
+    '/api/promos',
+  ],
+  actionRateLimiter,
+)
 
 app.get('/api/health', (_req, res) => {
   res.json({
