@@ -9,6 +9,34 @@ import { STANDOFFCRAFT_META, STANDOFFCRAFT_SKINS } from './server-data/standoffc
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
+// Локально читаем .env (на Render переменные приходят из Environment).
+// Формат простой KEY=VALUE, без внешних зависимостей.
+function loadDotEnv() {
+  try {
+    const raw = fs.readFileSync(path.join(__dirname, '.env'), 'utf8')
+    for (const line of raw.split(/\r?\n/)) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+      const eq = trimmed.indexOf('=')
+      if (eq === -1) continue
+      const key = trimmed.slice(0, eq).trim()
+      if (!key || key in process.env) continue
+      let value = trimmed.slice(eq + 1).trim()
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1)
+      }
+      process.env[key] = value
+    }
+  } catch {
+    /* .env отсутствует — это нормально */
+  }
+}
+
+loadDotEnv()
+
 const PORT = Number(process.env.PORT || 3001)
 // На хостинге путь к данным задаётся через DATA_DIR (например, диск Render).
 const DATA_DIR = process.env.DATA_DIR
@@ -38,6 +66,11 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'rainy'
 const ADMIN_START_BALANCE = Number(process.env.ADMIN_START_BALANCE || 100000)
 const OWNER_PASSWORD = process.env.OWNER_PASSWORD || 'owner12'
 const OWNER_START_BALANCE = Number(process.env.OWNER_START_BALANCE || 500000)
+// Регистрация: стартовый баланс и лимит аккаунтов на одного человека.
+const REGISTER_START_BALANCE = Number(process.env.REGISTER_START_BALANCE || 100)
+const MAX_ACCOUNTS_PER_PERSON = Number(process.env.MAX_ACCOUNTS_PER_PERSON || 2)
+const DEVICE_COOKIE = 'sg_device'
+const DEVICE_COOKIE_MAX_AGE = 365 * 24 * 60 * 60
 const UPGRADE_EDGE = 0.9
 const COMPENSATION_MIN = 0.05
 const COMPENSATION_MAX = 0.1
@@ -902,6 +935,8 @@ function defaultState() {
       owner: makeSeedUser('owner', OWNER_PASSWORD, 'owner', OWNER_START_BALANCE),
     },
     promos: defaultPromos(),
+    registrationIps: {},
+    registrationDevices: {},
   }
 }
 
@@ -944,6 +979,10 @@ function normalizeState(parsed) {
   if (!parsed.users.owner) parsed.users.owner = makeSeedUser('owner', OWNER_PASSWORD, 'owner', OWNER_START_BALANCE)
   Object.values(parsed.users).forEach(migrateUser)
   if (!Array.isArray(parsed.promos)) parsed.promos = defaultPromos()
+  if (!parsed.registrationIps || typeof parsed.registrationIps !== 'object') parsed.registrationIps = {}
+  if (!parsed.registrationDevices || typeof parsed.registrationDevices !== 'object') {
+    parsed.registrationDevices = {}
+  }
   parsed.dailyDistributed = Number(parsed.dailyDistributed) || 0
   parsed.version = 3
   return parsed
@@ -1519,6 +1558,106 @@ app.get('/api/online', (_req, res) => {
   res.json({ ok: true, online: Math.max(1, onlineCount()), serverTime: new Date().toISOString() })
 })
 
+function sessionPayload(user) {
+  return {
+    ok: true,
+    token: signToken(user.id),
+    user: publicUser(user),
+    daily: buildDaily(),
+    cases: CASE_PAYLOADS,
+    catalog: [...SKINS].sort((a, b) => a.price - b.price),
+    feed: liveFeed,
+    online: Math.max(1, onlineCount()),
+    promos: publicPromos(user),
+    event: winterEventInfo(),
+  }
+}
+
+function parseCookies(req) {
+  const result = {}
+  const header = String(req.headers?.cookie || '')
+  if (!header) return result
+  for (const part of header.split(';')) {
+    const index = part.indexOf('=')
+    if (index === -1) continue
+    const key = part.slice(0, index).trim()
+    if (!key) continue
+    try {
+      result[key] = decodeURIComponent(part.slice(index + 1).trim())
+    } catch {
+      result[key] = part.slice(index + 1).trim()
+    }
+  }
+  return result
+}
+
+// IP храним только в виде хэша — для лимита аккаунтов этого достаточно.
+function hashClientIp(ip) {
+  return crypto.createHash('sha256').update(`${ip}|${SESSION_SECRET}`).digest('hex').slice(0, 32)
+}
+
+function registrationCount(map, key) {
+  return key ? Math.max(0, Math.trunc(Number(map?.[key]) || 0)) : 0
+}
+
+app.post('/api/register', (req, res) => {
+  const rawUsername = String(req.body?.username || '').trim()
+  const username = rawUsername.toLowerCase()
+  const password = String(req.body?.password || '')
+  const accountLimit = Math.max(
+    1,
+    Math.trunc(Number(MAX_ACCOUNTS_PER_PERSON)) || 2,
+  )
+
+  if (!/^[a-z0-9_]{3,20}$/i.test(rawUsername)) {
+    return sendError(
+      res,
+      400,
+      'INVALID_USERNAME',
+      'Логин: 3–20 символов, только латиница, цифры и _',
+    )
+  }
+  if (password.length < 6) {
+    return sendError(res, 400, 'WEAK_PASSWORD', 'Пароль должен быть не короче 6 символов')
+  }
+  if (password.length > 128) {
+    return sendError(res, 400, 'WEAK_PASSWORD', 'Пароль слишком длинный (максимум 128 символов)')
+  }
+  if (state.users[username]) {
+    return sendError(res, 409, 'USERNAME_TAKEN', 'Этот логин уже занят')
+  }
+
+  const cookies = parseCookies(req)
+  let deviceId = String(cookies[DEVICE_COOKIE] || '').trim()
+  if (!/^[a-f0-9-]{16,64}$/i.test(deviceId)) deviceId = crypto.randomUUID()
+  const ipKey = hashClientIp(req.ip || req.socket?.remoteAddress || 'unknown')
+
+  if (
+    registrationCount(state.registrationIps, ipKey) >= accountLimit ||
+    registrationCount(state.registrationDevices, deviceId) >= accountLimit
+  ) {
+    return sendError(
+      res,
+      429,
+      'ACCOUNT_LIMIT',
+      `На одного человека можно создать не более ${accountLimit} аккаунтов`,
+    )
+  }
+
+  const user = makeSeedUser(username, password, 'player', REGISTER_START_BALANCE)
+  state.users[username] = user
+  state.registrationIps[ipKey] = registrationCount(state.registrationIps, ipKey) + 1
+  state.registrationDevices[deviceId] = registrationCount(state.registrationDevices, deviceId) + 1
+  saveState()
+
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : ''
+  res.setHeader(
+    'Set-Cookie',
+    `${DEVICE_COOKIE}=${deviceId}; Path=/; Max-Age=${DEVICE_COOKIE_MAX_AGE}; HttpOnly; SameSite=Lax${secure}`,
+  )
+  return res.status(201).json(sessionPayload(user))
+})
+
 app.post('/api/login', (req, res) => {
   const username = String(req.body?.username || '').trim().toLowerCase()
   const password = String(req.body?.password || '')
@@ -1537,19 +1676,7 @@ app.post('/api/login', (req, res) => {
     return sendError(res, 401, 'INVALID_CREDENTIALS', 'Неверный логин или пароль')
   }
 
-  const token = signToken(user.id)
-  res.json({
-    ok: true,
-    token,
-    user: publicUser(user),
-    daily: buildDaily(),
-    cases: CASE_PAYLOADS,
-    catalog: [...SKINS].sort((a, b) => a.price - b.price),
-    feed: liveFeed,
-    online: Math.max(1, onlineCount()),
-    promos: publicPromos(user),
-    event: winterEventInfo(),
-  })
+  res.json(sessionPayload(user))
 })
 
 app.get('/api/status', auth, (req, res) => {

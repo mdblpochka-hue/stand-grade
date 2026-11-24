@@ -44,24 +44,80 @@ node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 
 На бесплатном Render файловая система эфемерная: `store.json` сбрасывается
 при каждом деплое и рестарте. Чтобы балансы, инвентарь и промокоды сохранялись,
-подключите внешний Postgres:
+подключите внешний Postgres.
 
-1. Создай бесплатную базу в [Neon](https://neon.tech) или Supabase.
-2. Скопируй строку подключения вида
-   `postgresql://user:password@host/db?sslmode=require`.
-3. В Render → Environment добавь `DATABASE_URL` с этой строкой.
-4. Передеплой приложение.
+#### Supabase
 
-При старте сервер сам создаст таблицу `stand_grade_state`, загрузит из неё
-состояние и будет сохранять каждое изменение. `/api/health` покажет
-`"persistence":"postgres"` — значит, данные переживут следующий деплой.
-Первый запуск с пустой БД возьмёт локальный `data/store.json`, если он есть,
-иначе создаст аккаунты заново. Текущее эфемерное состояние Render автоматически
-не переносится — для переноса локального состояния выполни:
+1. Создай проект на [supabase.com](https://supabase.com) (регион ближе к Render,
+   например `us-east-1`). Пароль базы сохрани в менеджере паролей.
+2. Открой **Project Settings → Database → Connection string → URI** и выбери
+   **Session pooler** (порт `5432`). Прямое подключение (`db.<ref>.supabase.co`)
+   использует IPv6 и с Render может не работать.
+3. Скопируй строку вида
+   `postgresql://postgres.<ref>:<PASSWORD>@aws-0-<region>.pooler.supabase.com:5432/postgres`
+   и подставь пароль базы. Спецсимволы в пароле закодируй URL-encoding
+   (`@` → `%40`, `#` → `%23`, `:` → `%3A`).
+4. Render → сервис `stand-grade` → **Environment → Edit** → у `DATABASE_URL`
+   замени значение на строку из Supabase → **Save, rebuild, and deploy**.
+5. Проверь `https://stand-grade.onrender.com/api/health` — должно быть
+   `"persistence":"postgres"`.
+
+Секрет хранится только в Render Environment, в Git его не коммить.
+Локально его можно положить в `.env` (файл в `.gitignore`):
+
+```bash
+DATABASE_URL=postgresql://postgres.<ref>:<PASSWORD>@aws-0-<region>.pooler.supabase.com:5432/postgres
+```
+
+#### Перенос текущих аккаунтов из старой базы
+
+Если нужно сохранить текущие балансы, инвентарь и промокоды, сначала перенеси
+состояние из Render Postgres в Supabase. В Render открой базу → **Connect →
+External Database URL** — это `SOURCE_DATABASE_URL`. Строка Supabase — это
+`TARGET_DATABASE_URL`.
+
+Создай `.env` в корне проекта:
+
+```bash
+SOURCE_DATABASE_URL=postgresql://...render...
+TARGET_DATABASE_URL=postgresql://...supabase...
+```
+
+И выполни:
+
+```bash
+npm run db:copy
+```
+
+Скрипт читает таблицу `stand_grade_state` из старой базы и перезаписывает её
+в новой. После этого можно указывать Supabase в `DATABASE_URL` на Render.
+
+Если переносить нечего, просто подключи пустую Supabase: при первом старте
+сервер сам создаст таблицу `stand_grade_state` и аккаунты `player`, `admin`,
+`owner` с балансами по умолчанию.
+
+При старте сервер загружает состояние из БД и сохраняет каждое изменение.
+`/api/health` покажет `"persistence":"postgres"` — значит, данные переживут
+следующий деплой. Первый запуск с пустой БД возьмёт локальный `data/store.json`,
+если он есть, иначе создаст аккаунты заново.
+
+Импорт локального `data/store.json` в пустую базу:
 
 ```bash
 DATABASE_URL=postgresql://... npm run db:import
 ```
+
+На Windows PowerShell переменную удобнее задать так:
+
+```powershell
+$env:DATABASE_URL="postgresql://..."
+npm run db:import
+```
+
+Важно про бесплатный Supabase: проект **засыпает после 7 дней без запросов**.
+Пока он спит, приложение не сможет подключиться к базе — проект нужно разбудить
+вручную в дашборде Supabase. Для демо это нормально, для постоянной работы
+лучше платный план.
 
 Альтернатива для платного Render: подключить **Disk** с mount path `/var/data`
 и задать `DATA_DIR=/var/data` — тогда достаточно JSON-файла.

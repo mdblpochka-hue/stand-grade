@@ -4923,22 +4923,40 @@ const LOGIN_FEATURED_SKIN = {
   image: 'https://skin.standoffcraft.com/items/M4A1%20Year%20Of%20The%20Tiger.webp',
 }
 
-function LoginScreen({ onLogin, notice }) {
+function LoginScreen({ onLogin, onRegister, notice }) {
+  const [mode, setMode] = useState('login')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const isRegister = mode === 'register'
 
   async function submit(event) {
     event.preventDefault()
     if (loading) return
     setError('')
+    if (isRegister) {
+      if (!/^[a-zA-Z0-9_]{3,20}$/.test(username.trim())) {
+        setError('Логин: 3–20 символов, только латиница, цифры и _')
+        return
+      }
+      if (password.length < 6) {
+        setError('Пароль должен быть не короче 6 символов')
+        return
+      }
+      if (password !== confirmPassword) {
+        setError('Пароли не совпадают')
+        return
+      }
+    }
     setLoading(true)
     try {
-      await onLogin({ username, password })
+      const action = isRegister ? onRegister : onLogin
+      await action({ username, password })
     } catch (loginError) {
-      setError(loginError.message || 'Не удалось войти')
+      setError(loginError.message || (isRegister ? 'Не удалось создать аккаунт' : 'Не удалось войти'))
     } finally {
       setLoading(false)
     }
@@ -4947,6 +4965,12 @@ function LoginScreen({ onLogin, notice }) {
   function fillDemo() {
     setUsername('player')
     setPassword('player')
+    setError('')
+  }
+
+  function switchMode(next) {
+    setMode(next)
+    setConfirmPassword('')
     setError('')
   }
 
@@ -5033,13 +5057,35 @@ function LoginScreen({ onLogin, notice }) {
                 <div>
                   <div className="text-[9px] font-black uppercase tracking-[0.18em] text-acid/65">Account access</div>
                   <h2 className="mt-0.5 font-display text-[19px] font-black tracking-[-0.04em] text-white">
-                    Вход в аккаунт
+                    {isRegister ? 'Создание аккаунта' : 'Вход в аккаунт'}
                   </h2>
                 </div>
               </div>
 
+              <div className="mt-5 grid grid-cols-2 gap-1 rounded-xl border border-white/[0.07] bg-black/25 p-1">
+                {[
+                  ['login', 'Вход'],
+                  ['register', 'Регистрация'],
+                ].map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => switchMode(value)}
+                    className={`rounded-lg px-3 py-2 text-[9px] font-black uppercase tracking-[0.12em] transition ${
+                      mode === value
+                        ? 'bg-acid/12 text-acid shadow-[0_0_18px_rgba(53,255,135,0.12)]'
+                        : 'text-white/32 hover:bg-white/[0.04] hover:text-white/60'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
               <p className="mt-4 text-[10px] leading-relaxed text-white/32">
-                Войди, чтобы открывать кейсы, копить скины и собирать коллекцию.
+                {isRegister
+                  ? 'Придумай логин и пароль — аккаунт создастся сразу, стартовый баланс 100 G.'
+                  : 'Войди, чтобы открывать кейсы, копить скины и собирать коллекцию.'}
               </p>
 
               {notice && (
@@ -5060,7 +5106,7 @@ function LoginScreen({ onLogin, notice }) {
                       value={username}
                       onChange={(event) => setUsername(event.target.value)}
                       autoComplete="username"
-                      placeholder="player"
+                      placeholder={isRegister ? 'my_login' : 'player'}
                       className="h-11 w-full rounded-xl border border-white/[0.09] bg-black/25 pl-10 pr-3 text-[12px] font-semibold text-white placeholder:text-white/20 transition focus:border-acid/45 focus:bg-black/35 focus:outline-none"
                     />
                   </div>
@@ -5076,7 +5122,7 @@ function LoginScreen({ onLogin, notice }) {
                       type={showPassword ? 'text' : 'password'}
                       value={password}
                       onChange={(event) => setPassword(event.target.value)}
-                      autoComplete="current-password"
+                      autoComplete={isRegister ? 'new-password' : 'current-password'}
                       placeholder="••••••••"
                       className="h-11 w-full rounded-xl border border-white/[0.09] bg-black/25 pl-10 pr-11 text-[12px] font-semibold text-white placeholder:text-white/20 transition focus:border-acid/45 focus:bg-black/35 focus:outline-none"
                     />
@@ -5091,6 +5137,25 @@ function LoginScreen({ onLogin, notice }) {
                   </div>
                 </label>
 
+                {isRegister && (
+                  <label className="block">
+                    <span className="mb-1.5 block text-[8px] font-black uppercase tracking-[0.14em] text-white/35">
+                      Повтори пароль
+                    </span>
+                    <div className="relative">
+                      <Icon name="lock" size={15} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-white/25" />
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        value={confirmPassword}
+                        onChange={(event) => setConfirmPassword(event.target.value)}
+                        autoComplete="new-password"
+                        placeholder="••••••••"
+                        className="h-11 w-full rounded-xl border border-white/[0.09] bg-black/25 pl-10 pr-3 text-[12px] font-semibold text-white placeholder:text-white/20 transition focus:border-acid/45 focus:bg-black/35 focus:outline-none"
+                      />
+                    </div>
+                  </label>
+                )}
+
                 {error && (
                   <div className="flex items-start gap-2 rounded-xl border border-[#ff7189]/20 bg-[#ff7189]/[0.06] p-3 text-[9px] leading-relaxed text-[#ff9aac]">
                     <Icon name="alert" size={13} className="mt-0.5 shrink-0" />
@@ -5102,32 +5167,39 @@ function LoginScreen({ onLogin, notice }) {
                   {loading ? (
                     <>
                       <span className="spin-ring h-4 w-4 rounded-full border-2 border-[#041007]/30 border-t-[#041007]" />
-                      Проверяем...
+                      {isRegister ? 'Создаём...' : 'Проверяем...'}
                     </>
                   ) : (
                     <>
-                      Войти
+                      {isRegister ? 'Создать аккаунт' : 'Войти'}
                       <Icon name="arrowRight" size={15} />
                     </>
                   )}
                 </button>
               </form>
 
-              <div className="mt-5 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <div className="text-[8px] font-black uppercase tracking-[0.14em] text-white/26">Демо-доступ</div>
-                    <div className="mt-1 font-mono text-[10px] font-bold text-white/55">player / player</div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={fillDemo}
-                    className="rounded-lg border border-acid/18 bg-acid/[0.06] px-2.5 py-1.5 text-[8px] font-black uppercase tracking-[0.1em] text-acid transition hover:bg-acid/15"
-                  >
-                    Заполнить
-                  </button>
+              {isRegister ? (
+                <div className="mt-5 flex items-start gap-2 rounded-xl border border-acid/12 bg-acid/[0.04] p-3 text-[9px] leading-relaxed text-white/38">
+                  <Icon name="info" size={13} className="mt-0.5 shrink-0 text-acid/70" />
+                  На одного человека можно создать не более 2 аккаунтов.
                 </div>
-              </div>
+              ) : (
+                <div className="mt-5 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <div className="text-[8px] font-black uppercase tracking-[0.14em] text-white/26">Демо-доступ</div>
+                      <div className="mt-1 font-mono text-[10px] font-bold text-white/55">player / player</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={fillDemo}
+                      className="rounded-lg border border-acid/18 bg-acid/[0.06] px-2.5 py-1.5 text-[8px] font-black uppercase tracking-[0.1em] text-acid transition hover:bg-acid/15"
+                    >
+                      Заполнить
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <p className="mt-4 text-center text-[8px] leading-relaxed text-white/20">
                 Демо-проект. Реальные платежи отключены.
@@ -7313,11 +7385,7 @@ export default function App() {
     })
   }, [])
 
-  async function handleLogin(credentials) {
-    const data = await apiRequest('/api/login', {
-      method: 'POST',
-      body: credentials,
-    })
+  function applySession(data) {
     saveToken(data.token)
     setToken(data.token)
     setNotice('')
@@ -7339,6 +7407,22 @@ export default function App() {
     if (Number.isFinite(Number(data.online))) setOnline(Number(data.online))
     setBooting(false)
     unlockAudio()
+  }
+
+  async function handleLogin(credentials) {
+    const data = await apiRequest('/api/login', {
+      method: 'POST',
+      body: credentials,
+    })
+    applySession(data)
+  }
+
+  async function handleRegister(credentials) {
+    const data = await apiRequest('/api/register', {
+      method: 'POST',
+      body: credentials,
+    })
+    applySession(data)
   }
 
   async function handleLogout() {
@@ -7450,7 +7534,7 @@ export default function App() {
   if (!token || !status) {
     return (
       <>
-        <LoginScreen onLogin={handleLogin} notice={notice} />
+        <LoginScreen onLogin={handleLogin} onRegister={handleRegister} notice={notice} />
         <ToastStack toasts={toasts} />
       </>
     )
