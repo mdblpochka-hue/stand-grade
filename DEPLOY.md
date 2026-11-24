@@ -13,10 +13,9 @@
 | `DATA_DIR` | желательно | Папка для `store.json` и `session.secret` (на Render — `/var/data`). |
 | `DATABASE_URL` | для сохранения данных | Postgres для хранения аккаунтов между деплоями. Без него используется JSON-файл. |
 | `PLAYER_PASSWORD` | нет | Пароль `player` при первом создании базы (по умолчанию `player`). |
-| `ADMIN_PASSWORD` | нет | Пароль `admin` при первом создании базы (по умолчанию `rainy`). |
-| `ADMIN_START_BALANCE` | нет | Стартовый баланс админа (по умолчанию `100000`). |
 | `OWNER_PASSWORD` | нет | Пароль владельца `owner` при первом создании базы (по умолчанию `owner12`). |
 | `OWNER_START_BALANCE` | нет | Стартовый баланс владельца (по умолчанию `500000`). |
+| `ENABLE_ADMIN_ACCOUNT` | нет | `true` возвращает скрытого `admin` (по умолчанию выключен, аккаунт удалён). |
 
 Аккаунт `owner` нужен для вкладки «Промокоды»: только владелец и администратор
 могут создавать коды. Игроки активируют их и получают голду один раз на аккаунт.
@@ -37,7 +36,7 @@ node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
    - **Start Command:** `npm start`
    - **Health Check Path:** `/api/health`
 3. Environment → добавь `SESSION_SECRET` (Generate), `DATABASE_URL`
-   (см. раздел «Сохранение данных»), при желании `PLAYER_PASSWORD` и `ADMIN_PASSWORD`.
+   (см. раздел «Сохранение данных»), при желании `PLAYER_PASSWORD` и `OWNER_PASSWORD`.
 4. Deploy. Приложение будет доступно по адресу `https://<service>.onrender.com`.
 
 ### Сохранение данных между деплоями
@@ -93,8 +92,9 @@ npm run db:copy
 в новой. После этого можно указывать Supabase в `DATABASE_URL` на Render.
 
 Если переносить нечего, просто подключи пустую Supabase: при первом старте
-сервер сам создаст таблицу `stand_grade_state` и аккаунты `player`, `admin`,
-`owner` с балансами по умолчанию.
+сервер сам создаст таблицу `stand_grade_state` и аккаунты `player` и `owner`
+с балансами по умолчанию. Скрытый `admin` по умолчанию удалён; вернуть его
+можно переменной `ENABLE_ADMIN_ACCOUNT=true`.
 
 При старте сервер загружает состояние из БД и сохраняет каждое изменение.
 `/api/health` покажет `"persistence":"postgres"` — значит, данные переживут

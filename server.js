@@ -62,10 +62,14 @@ fs.mkdirSync(DATA_DIR, { recursive: true })
 
 // Пароли демо-аккаунтов можно переопределить переменными окружения.
 const PLAYER_PASSWORD = process.env.PLAYER_PASSWORD || 'player'
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'rainy'
-const ADMIN_START_BALANCE = Number(process.env.ADMIN_START_BALANCE || 100000)
 const OWNER_PASSWORD = process.env.OWNER_PASSWORD || 'owner12'
 const OWNER_START_BALANCE = Number(process.env.OWNER_START_BALANCE || 500000)
+// Скрытый admin удалён. Вернуть его можно флагом ENABLE_ADMIN_ACCOUNT=true.
+const ENABLE_ADMIN_ACCOUNT = /^(1|true|yes)$/i.test(
+  String(process.env.ENABLE_ADMIN_ACCOUNT || ''),
+)
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'rainy'
+const ADMIN_START_BALANCE = Number(process.env.ADMIN_START_BALANCE || 100000)
 // Регистрация: стартовый баланс и лимит аккаунтов на одного человека.
 const REGISTER_START_BALANCE = Number(process.env.REGISTER_START_BALANCE || 100)
 const MAX_ACCOUNTS_PER_PERSON = Number(process.env.MAX_ACCOUNTS_PER_PERSON || 2)
@@ -925,15 +929,18 @@ function defaultPromos() {
 }
 
 function defaultState() {
+  const users = {
+    player: makeSeedUser('player', PLAYER_PASSWORD, 'player', 100),
+    owner: makeSeedUser('owner', OWNER_PASSWORD, 'owner', OWNER_START_BALANCE),
+  }
+  if (ENABLE_ADMIN_ACCOUNT) {
+    users.admin = makeSeedUser('admin', ADMIN_PASSWORD, 'admin', ADMIN_START_BALANCE)
+  }
   return {
     version: 3,
     dayKey: null,
     dailyDistributed: 0,
-    users: {
-      player: makeSeedUser('player', PLAYER_PASSWORD, 'player', 100),
-      admin: makeSeedUser('admin', ADMIN_PASSWORD, 'admin', ADMIN_START_BALANCE),
-      owner: makeSeedUser('owner', OWNER_PASSWORD, 'owner', OWNER_START_BALANCE),
-    },
+    users,
     promos: defaultPromos(),
     registrationIps: {},
     registrationDevices: {},
@@ -975,8 +982,12 @@ function normalizeState(parsed) {
   }
   if (!parsed || typeof parsed !== 'object' || !parsed.users) return defaultState()
   if (!parsed.users.player) parsed.users.player = makeSeedUser('player', PLAYER_PASSWORD, 'player', 100)
-  if (!parsed.users.admin) parsed.users.admin = makeSeedUser('admin', ADMIN_PASSWORD, 'admin', ADMIN_START_BALANCE)
   if (!parsed.users.owner) parsed.users.owner = makeSeedUser('owner', OWNER_PASSWORD, 'owner', OWNER_START_BALANCE)
+  if (!parsed.users.admin && ENABLE_ADMIN_ACCOUNT) {
+    parsed.users.admin = makeSeedUser('admin', ADMIN_PASSWORD, 'admin', ADMIN_START_BALANCE)
+  }
+  // Скрытый admin удалён: при выключенном флаге стираем аккаунт и из старой базы.
+  if (!ENABLE_ADMIN_ACCOUNT) delete parsed.users.admin
   Object.values(parsed.users).forEach(migrateUser)
   if (!Array.isArray(parsed.promos)) parsed.promos = defaultPromos()
   if (!parsed.registrationIps || typeof parsed.registrationIps !== 'object') parsed.registrationIps = {}
@@ -2344,10 +2355,11 @@ saveState()
 app.listen(PORT, () => {
   console.log(`STAND GRADE API: http://localhost:${PORT}`)
   if (process.env.NODE_ENV !== 'production') {
-    console.log(`Demo accounts: player/${PLAYER_PASSWORD} · hidden admin: admin/${ADMIN_PASSWORD}`)
-  } else if (!process.env.SESSION_SECRET || !process.env.ADMIN_PASSWORD) {
+    const adminNote = ENABLE_ADMIN_ACCOUNT ? ` · admin/${ADMIN_PASSWORD}` : ''
+    console.log(`Demo accounts: player/${PLAYER_PASSWORD}${adminNote}`)
+  } else if (!process.env.SESSION_SECRET) {
     console.warn(
-      'WARNING: задайте SESSION_SECRET и ADMIN_PASSWORD в переменных окружения перед публичным деплоем',
+      'WARNING: задайте SESSION_SECRET в переменных окружения перед публичным деплоем',
     )
   }
 })
