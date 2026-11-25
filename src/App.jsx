@@ -1976,6 +1976,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   const session = user.glyphDrop || null
   const [activeDeckId, setActiveDeckId] = useState(null)
   const [modalOpen, setModalOpen] = useState(false)
+  const [openCount, setOpenCount] = useState(1)
   const [revealed, setRevealed] = useState(false)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
@@ -2035,12 +2036,25 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
     setUpgradeError('')
   }
 
+  function finishUpgrade() {
+    setUpgradeResult(null)
+    setUpgradeMultiplier(null)
+    setUpgradeRevealed(false)
+    setUpgradeError('')
+    if (user.glyphDrop) {
+      setRevealed(false)
+    } else {
+      setModalOpen(false)
+    }
+  }
+
   useEscape(closeModal, modalOpen)
 
   async function startDeck(deck) {
     if (!deck || actionRef.current || busy) return
-    if (user.balance + 1e-9 < deck.price) {
-      onToast('Недостаточно G для этой печати', 'error')
+    const totalPrice = deck.price * openCount
+    if (user.balance + 1e-9 < totalPrice) {
+      onToast(`Недостаточно G: нужно ${formatPrice(totalPrice)}`, 'error')
       return
     }
     actionRef.current = true
@@ -2051,7 +2065,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       const data = await apiRequest('/api/open-glyph', {
         method: 'POST',
         token,
-        body: { deckId: deck.id },
+        body: { deckId: deck.id, count: openCount },
       })
       onUpdate(data)
       setActiveDeckId(deck.id)
@@ -2122,7 +2136,14 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       onUpdate(data)
       playCoin()
       onToast(data.message, 'success', 'Дроп забран')
-      closeModal()
+      if (data.glyphDrop) {
+        setRevealed(false)
+        setUpgradeResult(null)
+        setUpgradeMultiplier(null)
+        setUpgradeError('')
+      } else {
+        closeModal()
+      }
     } catch (requestError) {
       setError(requestError.message)
       onToast(requestError.message, 'error')
@@ -2143,7 +2164,14 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       onUpdate(data)
       playCoin()
       onToast(data.message, 'success', 'Дроп продан')
-      closeModal()
+      if (data.glyphDrop) {
+        setRevealed(false)
+        setUpgradeResult(null)
+        setUpgradeMultiplier(null)
+        setUpgradeError('')
+      } else {
+        closeModal()
+      }
     } catch (requestError) {
       setError(requestError.message)
       onToast(requestError.message, 'error')
@@ -2220,7 +2248,8 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
               Активный дроп · {session.deckName}
             </div>
             <div className="mt-1 text-[11px] font-bold text-white/75">
-              {session.currentDrop?.name} · осталось перекрутов {session.attemptsLeft}/{session.attemptsTotal || 5}
+              {session.currentDrop?.name} · карта {session.count - session.remaining + 1} из {session.count} ·
+              перекрутов {session.attemptsLeft}/{session.attemptsTotal || 5}
             </div>
           </div>
           <button
@@ -2233,10 +2262,38 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
         </div>
       )}
 
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/[0.07] bg-white/[0.02] px-3 py-2">
+        <div>
+          <div className="text-[8px] font-black uppercase tracking-[0.14em] text-white/35">Открыть за раз</div>
+          <div className="mt-0.5 text-[7px] font-semibold text-white/22">
+            5 перекрутов на каждую карту
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {[1, 2, 3, 5, 10].map((count) => (
+            <button
+              key={count}
+              type="button"
+              onClick={() => setOpenCount(count)}
+              disabled={Boolean(session)}
+              className={cx(
+                'h-8 min-w-[34px] rounded-lg border text-[9px] font-black tabular-nums transition disabled:opacity-35',
+                openCount === count
+                  ? 'border-acid/40 bg-acid/[0.1] text-acid'
+                  : 'border-white/[0.08] text-white/40 hover:border-acid/25 hover:text-acid',
+              )}
+            >
+              {count}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {glyphs.map((deck, index) => {
           const top = deck.featuredSkin || deck.topPrize || deck.contents?.[0]
           const meta = top ? RARITY[top.rarity] || RARITY.Common : RARITY.Common
+          const displayPrice = deck.price * (session ? 1 : openCount)
           return (
             <article
               key={deck.id}
@@ -2260,9 +2317,11 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                   {deck.kicker}
                 </div>
                 <div className="absolute right-4 top-4 z-10 text-right">
-                  <div className="text-[7px] font-bold uppercase tracking-[0.14em] text-white/25">Печать</div>
+                  <div className="text-[7px] font-bold uppercase tracking-[0.14em] text-white/25">
+                    Печать{session ? '' : openCount > 1 ? ` ×${openCount}` : ''}
+                  </div>
                   <div className="mt-0.5 text-[13px] font-extrabold tabular-nums text-white">
-                    {formatPrice(deck.price)}
+                    {formatPrice(displayPrice)}
                   </div>
                 </div>
                 <GlyphCardBack
@@ -2337,6 +2396,11 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {session && (
+                  <span className="hidden rounded-lg border border-acid/20 bg-acid/[0.06] px-2 py-1 text-[7px] font-black uppercase tracking-[0.06em] text-acid/80 sm:inline">
+                    Карта {session.count - session.remaining + 1}/{session.count}
+                  </span>
+                )}
                 <span className="rounded-lg border border-white/[0.08] bg-black/25 px-2.5 py-1.5 text-[10px] font-extrabold tabular-nums text-white/70">
                   {formatPrice(activeDeck.price)}
                 </span>
@@ -2430,7 +2494,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
 
                       <button
                         type="button"
-                        onClick={closeModal}
+                        onClick={finishUpgrade}
                         className="btn-acid mt-3 w-full !py-3 !text-[10px] uppercase tracking-[0.08em]"
                       >
                         Готово
