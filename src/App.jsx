@@ -2465,7 +2465,25 @@ const BATTLE_MODES = [
   { id: 'underdog', label: 'Андердог', hint: 'Побеждает тот, у кого сумма скинов дешевле.' },
 ]
 
-function BattleSection({ cases, user, token, onUpdate, onToast }) {
+const BATTLE_REEL_LENGTH = 36
+const BATTLE_WINNER_INDEX = 26
+
+function makeBattleReel(caseData, winner, side, round) {
+  const contents = caseData?.contents || []
+  if (!contents.length) return []
+  const reel = Array.from({ length: BATTLE_REEL_LENGTH }, (_, index) => {
+    const skin = contents[(index * 7 + round * 5 + (side === 'opponent' ? 3 : 0)) % contents.length]
+    return { ...skin, reelId: `battle-${side}-${round}-${index}` }
+  })
+  reel[BATTLE_WINNER_INDEX] = {
+    ...(winner || contents[0]),
+    reelId: `battle-${side}-${round}-winner`,
+    winner: true,
+  }
+  return reel
+}
+
+function BattleSection({ cases, user, token, fast, onUpdate, onToast }) {
   const paidCases = useMemo(() => cases.filter((item) => item.price > 0), [cases])
   const [caseId, setCaseId] = useState(null)
   const [rounds, setRounds] = useState(3)
@@ -2473,8 +2491,18 @@ function BattleSection({ cases, user, token, onUpdate, onToast }) {
   const [opponentType, setOpponentType] = useState('player')
   const [result, setResult] = useState(null)
   const [running, setRunning] = useState(false)
-  const [revealStep, setRevealStep] = useState(0)
+  const [roundIndex, setRoundIndex] = useState(0)
+  const [revealedRounds, setRevealedRounds] = useState(0)
+  const [roundReels, setRoundReels] = useState(null)
+  const [spinningRound, setSpinningRound] = useState(false)
+  const [finished, setFinished] = useState(false)
   const [error, setError] = useState('')
+  const playerViewportRef = useRef(null)
+  const opponentViewportRef = useRef(null)
+  const playerTrackRef = useRef(null)
+  const opponentTrackRef = useRef(null)
+  const stopSoundRef = useRef(null)
+  const duration = fast ? 600 : 1550
 
   useEffect(() => {
     if (!paidCases.length) return
@@ -2488,31 +2516,107 @@ function BattleSection({ cases, user, token, onUpdate, onToast }) {
   const entry = caseData ? caseData.price * rounds : 0
   const canAfford = user.balance + 1e-9 >= entry
   const activeMode = BATTLE_MODES.find((item) => item.id === mode) || BATTLE_MODES[0]
+  const duelLocked = running || Boolean(result && !finished)
+  const playerDrops = (result?.playerSkins || []).slice(0, revealedRounds)
+  const opponentDrops = (result?.opponentSkins || []).slice(0, revealedRounds)
+
+  useLayoutEffect(() => {
+    if (!spinningRound || !roundReels || !result) return undefined
+
+    const tracks = []
+    const sides = [
+      { key: 'player', track: playerTrackRef.current, viewport: playerViewportRef.current },
+      { key: 'opponent', track: opponentTrackRef.current, viewport: opponentViewportRef.current },
+    ]
+
+    for (const side of sides) {
+      const { track, viewport } = side
+      if (!track || !viewport) continue
+      const reel = roundReels[side.key] || []
+      const flaggedIndex = reel.findIndex((item) => item.winner)
+      const target = track.children[flaggedIndex >= 0 ? flaggedIndex : BATTLE_WINNER_INDEX]
+      if (!target) continue
+
+      track.style.transition = 'none'
+      track.style.transform = 'translate3d(0,0,0)'
+      void track.offsetWidth
+
+      const jitter = (Math.random() * 0.35 - 0.175) * target.offsetWidth
+      const offset = Math.max(
+        0,
+        target.offsetLeft + target.offsetWidth / 2 + jitter - viewport.clientWidth / 2,
+      )
+      tracks.push({ track, offset })
+    }
+
+    const stopSound = startSpinSound(duration, 'case')
+    stopSoundRef.current = stopSound
+
+    const frame = requestAnimationFrame(() => {
+      tracks.forEach(({ track, offset }) => {
+        track.style.transition = `transform ${duration}ms ${REEL_EASING}`
+        track.style.transform = `translate3d(${-offset}px,0,0)`
+      })
+    })
+
+    const timer = setTimeout(() => {
+      stopSound()
+      if (stopSoundRef.current === stopSound) stopSoundRef.current = null
+      setSpinningRound(false)
+      const nextRevealed = roundIndex + 1
+      setRevealedRounds(nextRevealed)
+      const playerSkin = result.playerSkins[roundIndex]
+      if (playerSkin) playCaseResult(playerSkin.rarity)
+      if (nextRevealed >= result.rounds) {
+        setFinished(true)
+        playCaseResult(result.won ? 'Arcane' : 'Common')
+        if (result.message) onToast(result.message, result.won ? 'success' : 'error')
+      }
+    }, duration + 120)
+
+    return () => {
+      cancelAnimationFrame(frame)
+      clearTimeout(timer)
+      stopSound()
+      if (stopSoundRef.current === stopSound) stopSoundRef.current = null
+    }
+  }, [spinningRound, roundReels, result, roundIndex, duration, onToast])
 
   useEffect(() => {
-    if (!result) {
-      setRevealStep(0)
-      return undefined
-    }
-    setRevealStep(0)
-    let step = 0
-    const timer = setInterval(() => {
-      step += 1
-      setRevealStep(step)
-      if (step >= result.rounds) clearInterval(timer)
-    }, 460)
-    return () => clearInterval(timer)
-  }, [result])
+    if (!result || finished || spinningRound) return undefined
+    if (revealedRounds >= result.rounds) return undefined
+    const timer = setTimeout(() => {
+      const nextIndex = revealedRounds
+      setRoundIndex(nextIndex)
+      setRoundReels({
+        player: makeBattleReel(caseData, result.playerSkins[nextIndex], 'player', nextIndex),
+        opponent: makeBattleReel(caseData, result.opponentSkins[nextIndex], 'opponent', nextIndex),
+      })
+      setSpinningRound(true)
+    }, 430)
+    return () => clearTimeout(timer)
+  }, [result, finished, spinningRound, revealedRounds, caseData])
+
+  useEffect(
+    () => () => {
+      if (stopSoundRef.current) stopSoundRef.current()
+    },
+    [],
+  )
 
   function changeCase(nextId) {
-    if (running) return
+    if (duelLocked) return
     setCaseId(nextId)
     setResult(null)
+    setFinished(false)
+    setRoundReels(null)
+    setRevealedRounds(0)
+    setRoundIndex(0)
     setError('')
   }
 
   async function fight() {
-    if (!caseData || running) return
+    if (!caseData || duelLocked) return
     if (!canAfford) {
       onToast('Недостаточно голды для входа в битву', 'error')
       return
@@ -2521,6 +2625,11 @@ function BattleSection({ cases, user, token, onUpdate, onToast }) {
     setRunning(true)
     setError('')
     setResult(null)
+    setFinished(false)
+    setRoundReels(null)
+    setRevealedRounds(0)
+    setRoundIndex(0)
+    setSpinningRound(false)
     try {
       const data = await apiRequest('/api/case-battle', {
         method: 'POST',
@@ -2529,7 +2638,11 @@ function BattleSection({ cases, user, token, onUpdate, onToast }) {
       })
       onUpdate(data)
       setResult(data)
-      onToast(data.message, data.won ? 'success' : 'error')
+      setRoundReels({
+        player: makeBattleReel(caseData, data.playerSkins?.[0], 'player', 0),
+        opponent: makeBattleReel(caseData, data.opponentSkins?.[0], 'opponent', 0),
+      })
+      setSpinningRound(true)
     } catch (requestError) {
       setError(requestError.message)
       onToast(requestError.message, 'error')
@@ -2539,14 +2652,16 @@ function BattleSection({ cases, user, token, onUpdate, onToast }) {
     }
   }
 
-  useEffect(() => {
-    if (!result) return
-    if (revealStep < result.rounds) return
-    playCaseResult(result.won ? 'Arcane' : 'Common')
-  }, [revealStep, result])
+  function resetBattle() {
+    setResult(null)
+    setFinished(false)
+    setRoundReels(null)
+    setRevealedRounds(0)
+    setRoundIndex(0)
+    setSpinningRound(false)
+    setError('')
+  }
 
-  const revealed = result ? Math.min(result.rounds, revealStep) : 0
-  const finished = Boolean(result) && revealed >= result.rounds
 
   return (
     <section id="battle" className="pt-10 sm:pt-14">
@@ -2576,7 +2691,7 @@ function BattleSection({ cases, user, token, onUpdate, onToast }) {
                     <button
                       key={item.id}
                       type="button"
-                      disabled={running}
+                      disabled={duelLocked}
                       onClick={() => changeCase(item.id)}
                       className={cx(
                         'rounded-lg border px-2 py-1.5 text-left transition disabled:opacity-50',
@@ -2603,7 +2718,7 @@ function BattleSection({ cases, user, token, onUpdate, onToast }) {
                     <button
                       key={value}
                       type="button"
-                      disabled={running}
+                      disabled={duelLocked}
                       onClick={() => {
                         setRounds(value)
                         setResult(null)
@@ -2630,7 +2745,7 @@ function BattleSection({ cases, user, token, onUpdate, onToast }) {
                     <button
                       key={option.id}
                       type="button"
-                      disabled={running}
+                      disabled={duelLocked}
                       onClick={() => {
                         setOpponentType(option.id)
                         setResult(null)
@@ -2656,7 +2771,7 @@ function BattleSection({ cases, user, token, onUpdate, onToast }) {
                   <button
                     key={option.id}
                     type="button"
-                    disabled={running}
+                    disabled={duelLocked}
                     onClick={() => {
                       setMode(option.id)
                       setResult(null)
@@ -2694,16 +2809,21 @@ function BattleSection({ cases, user, token, onUpdate, onToast }) {
             <button
               type="button"
               onClick={fight}
-              disabled={running || !caseData || !canAfford}
+              disabled={duelLocked || !caseData || !canAfford}
               className={cx(
                 'btn-acid mt-2.5 h-10 w-full text-[10px] uppercase tracking-[0.1em]',
-                (running || !canAfford) && 'opacity-45',
+                (duelLocked || !canAfford) && 'opacity-45',
               )}
             >
               {running ? (
                 <>
                   <span className="spin-ring h-3.5 w-3.5 rounded-full border-2 border-[#041007]/25 border-t-[#041007]" />
                   Ищем соперника...
+                </>
+              ) : result && !finished ? (
+                <>
+                  <span className="spin-ring h-3.5 w-3.5 rounded-full border-2 border-[#041007]/25 border-t-[#041007]" />
+                  Идёт битва...
                 </>
               ) : (
                 <>
@@ -2751,21 +2871,30 @@ function BattleSection({ cases, user, token, onUpdate, onToast }) {
                     {
                       key: 'player',
                       name: user.username,
-                      skins: result.playerSkins,
-                      total: result.playerTotal,
-                      tone: '#35ff87',
                       tag: 'Ты',
+                      tone: '#35ff87',
+                      reel: roundReels?.player || [],
+                      drops: playerDrops,
+                      total: result.playerTotal,
+                      viewportRef: playerViewportRef,
+                      trackRef: playerTrackRef,
                     },
                     {
                       key: 'opponent',
                       name: result.opponent.name,
-                      skins: result.opponentSkins,
-                      total: result.opponentTotal,
-                      tone: '#8adfff',
                       tag: result.opponent.label,
+                      tone: '#8adfff',
+                      reel: roundReels?.opponent || [],
+                      drops: opponentDrops,
+                      total: result.opponentTotal,
+                      viewportRef: opponentViewportRef,
+                      trackRef: opponentTrackRef,
                     },
                   ].map((side) => (
-                    <div key={side.key} className="rounded-xl border border-white/[0.07] bg-black/20 p-2">
+                    <div
+                      key={side.key}
+                      className="min-w-0 rounded-xl border border-white/[0.07] bg-black/20 p-2"
+                    >
                       <div className="flex items-center justify-between gap-1">
                         <span className="truncate text-[9px] font-extrabold" style={{ color: side.tone }}>
                           {side.name}
@@ -2774,48 +2903,116 @@ function BattleSection({ cases, user, token, onUpdate, onToast }) {
                           {side.tag}
                         </span>
                       </div>
-                      <div className="mt-1.5 space-y-1">
-                        {side.skins.map((skin, index) => {
+
+                      <div
+                        className="relative mt-2 h-[92px] overflow-hidden rounded-lg border border-white/[0.06] bg-[#060c08]"
+                        ref={side.viewportRef}
+                      >
+                        <div className="pointer-events-none absolute inset-y-0 left-1/2 z-20 w-px -translate-x-1/2 bg-acid/70 shadow-[0_0_10px_rgba(53,255,135,.65)]" />
+                        <div className="pointer-events-none absolute left-1/2 top-0 z-30 -translate-x-1/2 border-x-[5px] border-t-[6px] border-x-transparent border-t-acid" />
+                        <div className="pointer-events-none absolute bottom-0 left-1/2 z-30 -translate-x-1/2 border-x-[5px] border-b-[6px] border-x-transparent border-b-acid" />
+                        <div className="roulette-mask h-full">
+                          <div
+                            ref={side.trackRef}
+                            className={cx(
+                              'flex h-full items-center gap-1.5 px-2',
+                              spinningRound && 'will-change-transform',
+                            )}
+                          >
+                            {side.reel.map((skin) => {
+                              const meta = RARITY[skin.rarity] || RARITY.Common
+                              const showWinner = skin.winner && !spinningRound
+                              return (
+                                <div
+                                  key={skin.reelId}
+                                  className={cx(
+                                    'relative h-[76px] w-[62px] shrink-0 overflow-hidden rounded-lg border bg-[#0b120d]',
+                                    showWinner
+                                      ? 'result-glow border-acid/60'
+                                      : 'border-white/[0.07]',
+                                  )}
+                                  style={!showWinner ? { borderColor: `${meta.color}20` } : undefined}
+                                >
+                                  <SkinVisual
+                                    skin={skin}
+                                    className="h-full w-full"
+                                    showRarity={false}
+                                    artClassName="w-[124%]"
+                                  />
+                                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#050906] via-[#050906]/85 to-transparent px-1 pb-0.5 pt-3 text-center text-[6.5px] font-extrabold tabular-nums text-acid">
+                                    {formatPrice(skin.price)}
+                                  </div>
+                                  {showWinner && (
+                                    <span className="absolute inset-x-0 top-0 bg-acid py-0.5 text-center text-[6px] font-black uppercase tracking-[0.08em] text-[#041007]">
+                                      дроп
+                                    </span>
+                                  )}
+                                </div>
+                              )
+                            })}
+                            {!side.reel.length && (
+                              <div className="flex h-full w-full items-center justify-center text-[8px] font-semibold text-white/20">
+                                Ожидание раунда…
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        {spinningRound && (
+                          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,transparent,rgba(53,255,135,.05),transparent)]" />
+                        )}
+                      </div>
+
+                      <div className="mt-2 space-y-1">
+                        {side.drops.map((skin, index) => {
                           const meta = RARITY[skin.rarity] || RARITY.Common
-                          const open = index < revealed
                           return (
                             <div
-                              key={`${side.key}-${skin.id}-${index}`}
-                              className={cx(
-                                'relative h-[46px] overflow-hidden rounded-lg border transition duration-300',
-                                open ? 'opacity-100' : 'opacity-40',
-                              )}
-                              style={{ borderColor: open ? `${meta.color}30` : 'rgba(255,255,255,.06)' }}
+                              key={`${side.key}-drop-${skin.id}-${index}`}
+                              className="flex items-center gap-1.5 rounded-lg border border-white/[0.06] bg-white/[0.02] p-1.5"
                             >
-                              {open ? (
-                                <>
-                                  <SkinVisual skin={skin} className="h-full w-full" showRarity={false} />
-                                  <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-gradient-to-t from-[#050906] via-[#050906]/80 to-transparent px-1 pb-0.5 pt-2">
-                                    <span className="truncate text-[6.5px] font-bold text-white/70">
-                                      {skin.weapon}
-                                    </span>
-                                    <span className="shrink-0 text-[7px] font-extrabold tabular-nums text-acid">
-                                      {formatPrice(skin.price)}
-                                    </span>
-                                  </div>
-                                </>
-                              ) : (
-                                <div className="flex h-full w-full items-center justify-center text-white/18">
-                                  <Icon name="lock" size={11} />
+                              <SkinVisual
+                                skin={skin}
+                                className="h-9 w-12 shrink-0 rounded-md"
+                                showRarity={false}
+                                artClassName="w-[124%]"
+                              />
+                              <div className="min-w-0 flex-1">
+                                <div className="truncate text-[7.5px] font-bold text-white/70">
+                                  {skin.name}
                                 </div>
-                              )}
+                                <div
+                                  className="text-[6.5px] font-black uppercase tracking-[0.08em]"
+                                  style={{ color: meta.color }}
+                                >
+                                  {meta.label}
+                                </div>
+                              </div>
+                              <span className="shrink-0 text-[7.5px] font-extrabold tabular-nums text-acid">
+                                {formatPrice(skin.price)}
+                              </span>
                             </div>
                           )
                         })}
+                        {!side.drops.length && (
+                          <div className="rounded-lg border border-dashed border-white/[0.06] px-2 py-2 text-center text-[7px] font-semibold text-white/20">
+                            Дроп появится после первого раунда
+                          </div>
+                        )}
                       </div>
+
                       <div className="mt-1.5 flex items-center justify-between border-t border-white/[0.06] pt-1.5">
                         <span className="text-[6.5px] font-black uppercase tracking-[0.08em] text-white/24">
                           Сумма
                         </span>
-                        <span className="text-[10px] font-extrabold tabular-nums" style={{ color: side.tone }}>
-                          {finished ? formatPrice(side.total) : `${formatPrice(
-                            side.skins.slice(0, revealed).reduce((sum, skin) => sum + skin.price, 0),
-                          )}…`}
+                        <span
+                          className="text-[10px] font-extrabold tabular-nums"
+                          style={{ color: side.tone }}
+                        >
+                          {finished
+                            ? formatPrice(side.total)
+                            : `${formatPrice(
+                                side.drops.reduce((sum, skin) => sum + skin.price, 0),
+                              )}…`}
                         </span>
                       </div>
                     </div>
@@ -2878,7 +3075,9 @@ function BattleSection({ cases, user, token, onUpdate, onToast }) {
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 text-[9px] font-bold text-white/42">
                         <span className="spin-ring h-3.5 w-3.5 rounded-full border-2 border-acid/20 border-t-acid" />
-                        Раунд {Math.min(revealed + 1, result.rounds)} из {result.rounds}
+                        {spinningRound
+                          ? `Крутим раунд ${roundIndex + 1} из ${result.rounds}`
+                          : `Раунд ${Math.min(revealedRounds + 1, result.rounds)} из ${result.rounds}`}
                       </div>
                       <span className="text-[8px] font-bold tabular-nums text-white/26">
                         {formatPrice(result.payout)} в банке
@@ -2890,10 +3089,7 @@ function BattleSection({ cases, user, token, onUpdate, onToast }) {
                 {finished && (
                   <button
                     type="button"
-                    onClick={() => {
-                      setResult(null)
-                      setError('')
-                    }}
+                    onClick={resetBattle}
                     className="mt-2 w-full rounded-lg border border-white/[0.09] py-2 text-[9px] font-extrabold uppercase tracking-[0.08em] text-white/55 transition hover:border-acid/30 hover:text-acid"
                   >
                     Ещё дуэль
@@ -4000,6 +4196,41 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                       </span>
                     )}
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={runUpgrade}
+                    disabled={!baseItems.length || !target || upgrading}
+                    className="btn-acid group mt-2 w-full !px-2 !py-3.5 !text-[11px] uppercase tracking-[0.08em] disabled:shadow-none"
+                  >
+                    {upgrading ? (
+                      <>
+                        <span className="spin-ring h-4 w-4 rounded-full border-2 border-[#041007]/30 border-t-[#041007]" />
+                        Крутим колесо...
+                      </>
+                    ) : (
+                      <>
+                        <Icon name="refresh" size={15} strokeWidth={2.6} />
+                        {target
+                          ? `Апгрейд за ${baseItems.length ? formatPrice(baseTotal + boost) : ''}`
+                          : 'Выберите цель'}
+                        {target && (
+                          <span className="text-[9px] font-black text-[#041007]/55">
+                            {chance.toFixed(chance >= 10 ? 0 : 1)}%
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </button>
+                  <div className="mt-1 flex items-center justify-center gap-1.5 text-center text-[7.5px] font-semibold text-white/22">
+                    <Icon name="alert" size={9} className="text-white/18" />
+                    При провале предметы сгорают
+                  </div>
+                  {error && (
+                    <div className="mt-1 text-center text-[9px] font-semibold text-[#ff8b9e]">
+                      {error}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -4121,34 +4352,8 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={runUpgrade}
-                disabled={!baseItems.length || !target || upgrading}
-                className="btn-acid group mt-4 w-full !py-4 !text-[12px] uppercase tracking-[0.1em] disabled:shadow-none"
-              >
-                {upgrading ? (
-                  <>
-                    <span className="spin-ring h-4 w-4 rounded-full border-2 border-[#041007]/30 border-t-[#041007]" />
-                    Крутим колесо...
-                  </>
-                ) : (
-                  <>
-                    <Icon name="refresh" size={16} strokeWidth={2.6} />
-                    {target
-                      ? `Апгрейд за ${baseItems.length ? formatPrice(baseTotal + boost) : ''}`
-                      : 'Выберите цель'}
-                    {target && <span className="text-[10px] font-black text-[#041007]/55">{chance.toFixed(chance >= 10 ? 0 : 1)}%</span>}
-                  </>
-                )}
-              </button>
-              <div className="mt-2 flex items-center justify-center gap-1.5 text-center text-[8px] font-semibold text-white/22">
-                <Icon name="alert" size={10} className="text-white/18" />
-                Стрелка остановится на секторе результата · при провале предметы сгорают
               </div>
-              {error && <div className="mt-2 text-center text-[9px] font-semibold text-[#ff8b9e]">{error}</div>}
             </div>
-          </div>
 
           <div className="min-w-0">
             <div className="flex items-center justify-between gap-3">
@@ -8493,6 +8698,7 @@ export default function App() {
               cases={cases}
               user={user}
               token={token}
+              fast={fast}
               onUpdate={applyUpdate}
               onToast={pushToast}
             />
