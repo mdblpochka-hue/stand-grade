@@ -1981,10 +1981,12 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   const [error, setError] = useState('')
   const [upgradeMultiplier, setUpgradeMultiplier] = useState(null)
   const [upgradeResult, setUpgradeResult] = useState(null)
+  const [upgradeRevealed, setUpgradeRevealed] = useState(false)
   const [upgradeBusy, setUpgradeBusy] = useState(false)
   const [upgradeError, setUpgradeError] = useState('')
   const actionRef = useRef(false)
   const duration = fast ? 320 : 650
+  const upgradeDuration = fast ? ANIM_MS_FAST : ANIM_MS_NORMAL
 
   const activeDeck =
     glyphs.find((deck) => deck.id === (session?.deckId || activeDeckId)) || null
@@ -1999,10 +2001,28 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
     return () => clearTimeout(timer)
   }, [session?.rollId, duration, session?.currentDrop?.rarity])
 
+  useEffect(() => {
+    if (!upgradeResult) {
+      setUpgradeRevealed(false)
+      return undefined
+    }
+    setUpgradeRevealed(false)
+    const timer = setTimeout(() => {
+      setUpgradeRevealed(true)
+      playUpgradeResult(upgradeResult.won)
+      if (upgradeResult.message) {
+        onToast(upgradeResult.message, upgradeResult.won ? 'success' : 'error')
+      }
+    }, upgradeDuration + 120)
+    return () => clearTimeout(timer)
+  }, [upgradeResult, upgradeDuration, onToast])
+
   function closeModal() {
+    if (upgradeResult && !upgradeRevealed) return
     setModalOpen(false)
     setUpgradeResult(null)
     setUpgradeMultiplier(null)
+    setUpgradeRevealed(false)
     setUpgradeError('')
   }
 
@@ -2132,6 +2152,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
     setUpgradeMultiplier(multiplier)
     setUpgradeError('')
     setUpgradeResult(null)
+    setUpgradeRevealed(false)
     unlockAudio()
     try {
       const data = await apiRequest('/api/glyph/upgrade', {
@@ -2141,8 +2162,6 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       })
       onUpdate(data)
       setUpgradeResult(data)
-      playUpgradeResult(data.won)
-      onToast(data.message, data.won ? 'success' : 'error')
     } catch (requestError) {
       setUpgradeError(requestError.message)
       onToast(requestError.message, 'error')
@@ -2309,7 +2328,8 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                 <button
                   type="button"
                   onClick={closeModal}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.09] text-white/45 transition hover:border-white/20 hover:text-white"
+                  disabled={Boolean(upgradeResult && !upgradeRevealed)}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.09] text-white/45 transition hover:border-white/20 hover:text-white disabled:opacity-30"
                   aria-label="Закрыть"
                 >
                   <Icon name="x" size={14} />
@@ -2325,20 +2345,39 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                       <div className="text-[8px] font-black uppercase tracking-[0.16em] text-white/30">
                         Апгрейд x{upgradeResult.multiplier}
                       </div>
-                      <div className={cx('mt-1 font-display text-[20px] font-black', upgradeResult.won ? 'text-acid' : 'text-[#ff9aac]')}>
-                        {upgradeResult.won ? 'Успех' : 'Провал'}
+                      <div
+                        className={cx(
+                          'mt-1 font-display text-[20px] font-black',
+                          upgradeRevealed
+                            ? upgradeResult.won
+                              ? 'text-acid'
+                              : 'text-[#ff9aac]'
+                            : 'text-white/70',
+                        )}
+                      >
+                        {upgradeRevealed ? (upgradeResult.won ? 'Успех' : 'Провал') : 'Крутим колесо...'}
                       </div>
                       <div className="mt-1 text-[8px] font-semibold text-white/30">
-                        шанс {upgradeResult.chance}% · ролл {Number(upgradeResult.roll).toFixed(2)}%
+                        шанс {upgradeResult.chance}%
+                        {upgradeRevealed
+                          ? ` · ролл ${Number(upgradeResult.roll).toFixed(2)}%`
+                          : ' · результат после остановки'}
                       </div>
                     </div>
-                    <div className={cx('rounded-xl border px-3 py-2 text-right', upgradeResult.net >= 0 ? 'border-acid/25 bg-acid/[0.06]' : 'border-[#ff5d7a]/25 bg-[#ff5d7a]/[0.06]')}>
-                      <div className="text-[7px] font-black uppercase tracking-[0.12em] text-white/25">Итог</div>
-                      <div className={cx('text-[13px] font-extrabold tabular-nums', upgradeResult.net >= 0 ? 'text-acid' : 'text-[#ff9aac]')}>
-                        {upgradeResult.net >= 0 ? '+' : '-'}
-                        {formatPrice(Math.abs(upgradeResult.net))}
+                    {upgradeRevealed ? (
+                      <div className={cx('rounded-xl border px-3 py-2 text-right', upgradeResult.net >= 0 ? 'border-acid/25 bg-acid/[0.06]' : 'border-[#ff5d7a]/25 bg-[#ff5d7a]/[0.06]')}>
+                        <div className="text-[7px] font-black uppercase tracking-[0.12em] text-white/25">Итог</div>
+                        <div className={cx('text-[13px] font-extrabold tabular-nums', upgradeResult.net >= 0 ? 'text-acid' : 'text-[#ff9aac]')}>
+                          {upgradeResult.net >= 0 ? '+' : '-'}
+                          {formatPrice(Math.abs(upgradeResult.net))}
+                        </div>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="flex h-10 items-center gap-2 rounded-xl border border-white/[0.08] bg-black/20 px-3">
+                        <span className="spin-ring h-4 w-4 rounded-full border-2 border-acid/15 border-t-acid" />
+                        <span className="text-[7px] font-black uppercase tracking-[0.1em] text-white/30">ожидание</span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="mt-3 flex flex-col items-center">
@@ -2346,7 +2385,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                       chance={upgradeResult.chance}
                       roll={upgradeResult.roll}
                       size={210}
-                      duration={fast ? 500 : 1050}
+                      duration={upgradeDuration}
                       spinKey={upgradeResult.roll}
                     >
                       <span className="relative text-[7px] font-black uppercase tracking-[0.18em] text-white/28">шанс</span>
@@ -2354,31 +2393,40 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                     </ProbabilityWheel>
                   </div>
 
-                  <div className="mt-3 rounded-xl border border-white/[0.07] bg-black/20 p-3">
-                    {upgradeResult.won ? (
-                      <>
-                        <div className="text-[8px] font-black uppercase tracking-[0.14em] text-acid/70">Получен скин</div>
-                        <div className="mt-1 text-[12px] font-extrabold text-white">{upgradeResult.wonItem?.name || upgradeResult.targetSkin?.name}</div>
-                        <div className="mt-1 text-[11px] font-extrabold tabular-nums text-acid">
-                          {formatPrice(upgradeResult.wonItem?.price || upgradeResult.targetSkin?.price || 0)}
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="text-[8px] font-black uppercase tracking-[0.14em] text-[#ff9aac]/70">Компенсация</div>
-                        <div className="mt-1 text-[12px] font-extrabold text-[#ff9aac]">+{formatPrice(upgradeResult.compensation || 0)}</div>
-                        <div className="mt-1 text-[8px] font-semibold text-white/28">Дроп сгорел, 5–10% стоимости вернулось на баланс.</div>
-                      </>
-                    )}
-                  </div>
+                  {upgradeRevealed ? (
+                    <>
+                      <div className="mt-3 rounded-xl border border-white/[0.07] bg-black/20 p-3">
+                        {upgradeResult.won ? (
+                          <>
+                            <div className="text-[8px] font-black uppercase tracking-[0.14em] text-acid/70">Получен скин</div>
+                            <div className="mt-1 text-[12px] font-extrabold text-white">{upgradeResult.wonItem?.name || upgradeResult.targetSkin?.name}</div>
+                            <div className="mt-1 text-[11px] font-extrabold tabular-nums text-acid">
+                              {formatPrice(upgradeResult.wonItem?.price || upgradeResult.targetSkin?.price || 0)}
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="text-[8px] font-black uppercase tracking-[0.14em] text-[#ff9aac]/70">Компенсация</div>
+                            <div className="mt-1 text-[12px] font-extrabold text-[#ff9aac]">+{formatPrice(upgradeResult.compensation || 0)}</div>
+                            <div className="mt-1 text-[8px] font-semibold text-white/28">Дроп сгорел, 5–10% стоимости вернулось на баланс.</div>
+                          </>
+                        )}
+                      </div>
 
-                  <button
-                    type="button"
-                    onClick={closeModal}
-                    className="btn-acid mt-3 w-full !py-3 !text-[10px] uppercase tracking-[0.08em]"
-                  >
-                    Готово
-                  </button>
+                      <button
+                        type="button"
+                        onClick={closeModal}
+                        className="btn-acid mt-3 w-full !py-3 !text-[10px] uppercase tracking-[0.08em]"
+                      >
+                        Готово
+                      </button>
+                    </>
+                  ) : (
+                    <div className="mt-3 flex items-center justify-center gap-2 rounded-xl border border-white/[0.07] bg-black/20 py-4">
+                      <span className="spin-ring h-4 w-4 rounded-full border-2 border-acid/15 border-t-acid" />
+                      <span className="text-[8px] font-black uppercase tracking-[0.12em] text-white/35">колесо крутится</span>
+                    </div>
+                  )}
                 </div>
               ) : session && drop ? (
                 <div>
