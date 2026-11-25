@@ -7335,7 +7335,24 @@ function ApplicationsSection({ applications, user, token, onUpdate, onToast }) {
   )
 }
 
-function SettingsSection({ user, soundOn, fast, onToggleSound, onToggleFast, onLogout, onStore }) {
+function SettingsSection({
+  user,
+  token,
+  soundOn,
+  fast,
+  onToggleSound,
+  onToggleFast,
+  onLogout,
+  onStore,
+  onPasswordChanged,
+  onToast,
+}) {
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [changingPassword, setChangingPassword] = useState(false)
+  const [passwordError, setPasswordError] = useState('')
+  const [passwordOk, setPasswordOk] = useState('')
   const roleLabel =
     user.role === 'owner'
       ? 'Владелец проекта'
@@ -7343,6 +7360,42 @@ function SettingsSection({ user, soundOn, fast, onToggleSound, onToggleFast, onL
         ? 'Скрытый администратор'
         : 'Player account'
   const roleTag = user.role === 'owner' ? 'OWNER' : user.role === 'admin' ? 'ADMIN' : 'PLAYER'
+
+  async function changePassword(event) {
+    event.preventDefault()
+    if (changingPassword) return
+    setPasswordError('')
+    setPasswordOk('')
+
+    if (newPassword.length < 8) {
+      setPasswordError('Новый пароль должен быть не короче 8 символов')
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError('Новые пароли не совпадают')
+      return
+    }
+
+    setChangingPassword(true)
+    try {
+      const data = await apiRequest('/api/account/password', {
+        method: 'POST',
+        token,
+        body: { currentPassword, newPassword },
+      })
+      onPasswordChanged?.(data.token)
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+      setPasswordOk(data.message || 'Пароль изменён')
+      onToast?.(data.message || 'Пароль изменён', 'success', 'Безопасность')
+    } catch (requestError) {
+      setPasswordError(requestError.message)
+      onToast?.(requestError.message, 'error')
+    } finally {
+      setChangingPassword(false)
+    }
+  }
 
   return (
     <section id="settings" className="pt-10 sm:pt-14">
@@ -7448,6 +7501,70 @@ function SettingsSection({ user, soundOn, fast, onToggleSound, onToggleFast, onL
             Выйти из аккаунта
           </button>
         </div>
+      </div>
+
+      <div className="relative mt-3 overflow-hidden rounded-[22px] border border-white/[0.08] bg-[linear-gradient(155deg,#0e1714,#090d0b)] p-4 sm:p-5">
+        <div className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full bg-[#7bdcff]/10 blur-3xl" />
+        <div className="relative flex items-center gap-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#7bdcff]/25 bg-[#7bdcff]/[0.08] text-[#7bdcff]">
+            <Icon name="lock" size={16} />
+          </span>
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-[0.14em] text-white/70">
+              Смена пароля
+            </div>
+            <div className="text-[8px] font-semibold text-white/30">
+              После смены остальные сессии завершатся
+            </div>
+          </div>
+        </div>
+
+        <form onSubmit={changePassword} className="relative mt-3 grid gap-2 sm:grid-cols-3">
+          <input
+            type="password"
+            value={currentPassword}
+            onChange={(event) => setCurrentPassword(event.target.value)}
+            autoComplete="current-password"
+            required
+            placeholder="Текущий пароль"
+            className="h-10 w-full rounded-xl border border-white/[0.09] bg-black/30 px-3 text-[10px] font-semibold text-white placeholder:text-white/20 focus:border-[#7bdcff]/40 focus:outline-none"
+          />
+          <input
+            type="password"
+            value={newPassword}
+            onChange={(event) => setNewPassword(event.target.value)}
+            autoComplete="new-password"
+            required
+            minLength={8}
+            placeholder="Новый пароль (мин. 8)"
+            className="h-10 w-full rounded-xl border border-white/[0.09] bg-black/30 px-3 text-[10px] font-semibold text-white placeholder:text-white/20 focus:border-[#7bdcff]/40 focus:outline-none"
+          />
+          <input
+            type="password"
+            value={confirmPassword}
+            onChange={(event) => setConfirmPassword(event.target.value)}
+            autoComplete="new-password"
+            required
+            minLength={8}
+            placeholder="Повтори новый пароль"
+            className="h-10 w-full rounded-xl border border-white/[0.09] bg-black/30 px-3 text-[10px] font-semibold text-white placeholder:text-white/20 focus:border-[#7bdcff]/40 focus:outline-none"
+          />
+          <div className="flex flex-wrap items-center gap-2 sm:col-span-3">
+            <button
+              type="submit"
+              disabled={changingPassword}
+              className="rounded-xl border border-[#7bdcff]/30 bg-[#7bdcff]/[0.09] px-4 py-2.5 text-[8px] font-black uppercase tracking-[0.1em] text-[#bfe9ff] transition hover:bg-[#7bdcff]/[0.16] disabled:opacity-40"
+            >
+              {changingPassword ? 'Меняем...' : 'Изменить пароль'}
+            </button>
+            {passwordError && (
+              <span className="text-[8px] font-semibold text-[#ff9aac]">{passwordError}</span>
+            )}
+            {passwordOk && (
+              <span className="text-[8px] font-semibold text-acid">{passwordOk}</span>
+            )}
+          </div>
+        </form>
       </div>
     </section>
   )
@@ -8415,12 +8532,18 @@ export default function App() {
           {activeSection === 'settings' && (
             <SettingsSection
               user={user}
+              token={token}
               soundOn={soundOn}
               fast={fast}
               onToggleSound={toggleSound}
               onToggleFast={toggleFast}
               onLogout={handleLogout}
               onStore={goStore}
+              onPasswordChanged={(newToken) => {
+                saveToken(newToken)
+                setToken(newToken)
+              }}
+              onToast={pushToast}
             />
           )}
         </div>

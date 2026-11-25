@@ -124,6 +124,7 @@ const SECURITY_SENSITIVE_PATHS = new Set([
   '/api/promos',
   '/api/promos/activate',
   '/api/applications',
+  '/api/account/password',
 ])
 const RESERVED_USERNAMES = new Set(['player', 'admin', 'owner'])
 // Демо-аккаунт player выключен по умолчанию. Включается только явно.
@@ -938,6 +939,7 @@ function makeSeedUser(username, password, role, balance) {
     id: username,
     username,
     role,
+    tokenVersion: 0,
     salt,
     passwordHash: hashPassword(password, salt),
     balance,
@@ -997,6 +999,7 @@ function defaultState() {
 }
 
 function migrateUser(user) {
+  user.tokenVersion = Math.max(0, Math.trunc(Number(user.tokenVersion) || 0))
   if (!Array.isArray(user.inventory)) user.inventory = []
   user.inventory = user.inventory
     .map((entry) => {
@@ -1163,9 +1166,13 @@ function loadSessionSecret() {
 
 const SESSION_SECRET = process.env.SESSION_SECRET || loadSessionSecret()
 
-function signToken(userId) {
+function signToken(userId, version = 0) {
   const payload = Buffer.from(
-    JSON.stringify({ uid: userId, exp: Date.now() + SESSION_TTL_MS }),
+    JSON.stringify({
+      uid: userId,
+      ver: Math.max(0, Math.trunc(Number(version) || 0)),
+      exp: Date.now() + SESSION_TTL_MS,
+    }),
   ).toString('base64url')
   const signature = crypto
     .createHmac('sha256', SESSION_SECRET)
@@ -1345,6 +1352,14 @@ function auth(req, res, next) {
   const user = payload ? state.users[payload.uid] : null
   if (!user) {
     return res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Требуется авторизация' } })
+  }
+  if (Number(payload.ver || 0) !== (Number(user.tokenVersion) || 0)) {
+    return res.status(401).json({
+      error: {
+        code: 'TOKEN_REVOKED',
+        message: 'Сессия устарела после смены пароля. Войдите снова.',
+      },
+    })
   }
   if (user.disabled) {
     return res.status(403).json({
@@ -2032,6 +2047,7 @@ app.use(
     '/api/deposit',
     '/api/promos',
     '/api/applications',
+    '/api/account/password',
   ],
   actionRateLimiter,
 )
@@ -2053,7 +2069,7 @@ app.get('/api/online', (_req, res) => {
 function sessionPayload(user) {
   return {
     ok: true,
-    token: signToken(user.id),
+    token: signToken(user.id, user.tokenVersion),
     user: publicUser(user),
     daily: buildDaily(),
     cases: CASE_PAYLOADS,
@@ -2190,6 +2206,46 @@ app.post('/api/login', (req, res) => {
 
   clearIpViolations(req)
   res.json(sessionPayload(user))
+})
+
+app.post('/api/account/password', auth, (req, res) => {
+  const user = req.user
+  const currentPassword = String(req.body?.currentPassword || '')
+  const newPassword = String(req.body?.newPassword || '')
+
+  if (!currentPassword || !newPassword) {
+    return sendError(res, 400, 'BAD_REQUEST', 'Укажите текущий и новый пароль')
+  }
+  if (newPassword.length < 8) {
+    return sendError(res, 400, 'WEAK_PASSWORD', 'Новый пароль должен быть не короче 8 символов')
+  }
+  if (newPassword.length > 128) {
+    return sendError(res, 400, 'WEAK_PASSWORD', 'Пароль слишком длинный (максимум 128 символов)')
+  }
+  if (newPassword === currentPassword) {
+    return sendError(res, 400, 'SAME_PASSWORD', 'Новый пароль должен отличаться от текущего')
+  }
+
+  const expected = Buffer.from(hashPassword(currentPassword, user.salt), 'hex')
+  const actual = Buffer.from(user.passwordHash, 'hex')
+  if (expected.length !== actual.length || !crypto.timingSafeEqual(expected, actual)) {
+    recordIpViolation(req, 'password_change_fail')
+    return sendError(res, 401, 'INVALID_PASSWORD', 'Текущий пароль неверен')
+  }
+
+  const salt = crypto.randomBytes(16).toString('hex')
+  user.salt = salt
+  user.passwordHash = hashPassword(newPassword, salt)
+  user.passwordChangedAt = new Date().toISOString()
+  user.tokenVersion = Math.max(0, Math.trunc(Number(user.tokenVersion) || 0)) + 1
+  clearIpViolations(req)
+  saveState()
+
+  return res.json({
+    ok: true,
+    token: signToken(user.id, user.tokenVersion),
+    message: 'Пароль изменён. Остальные сессии завершены.',
+  })
 })
 
 app.get('/api/status', auth, (req, res) => {
