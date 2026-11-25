@@ -1985,6 +1985,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   const [upgradeBusy, setUpgradeBusy] = useState(false)
   const [upgradeError, setUpgradeError] = useState('')
   const actionRef = useRef(false)
+  const stopSoundRef = useRef(null)
   const duration = fast ? 320 : 650
   const upgradeDuration = fast ? ANIM_MS_FAST : ANIM_MS_NORMAL
 
@@ -2007,14 +2008,22 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       return undefined
     }
     setUpgradeRevealed(false)
+    const stopSound = startSpinSound(upgradeDuration, 'upgrade')
+    stopSoundRef.current = stopSound
     const timer = setTimeout(() => {
+      stopSound()
+      if (stopSoundRef.current === stopSound) stopSoundRef.current = null
       setUpgradeRevealed(true)
       playUpgradeResult(upgradeResult.won)
       if (upgradeResult.message) {
         onToast(upgradeResult.message, upgradeResult.won ? 'success' : 'error')
       }
     }, upgradeDuration + 120)
-    return () => clearTimeout(timer)
+    return () => {
+      clearTimeout(timer)
+      stopSound()
+      if (stopSoundRef.current === stopSound) stopSoundRef.current = null
+    }
   }, [upgradeResult, upgradeDuration, onToast])
 
   function closeModal() {
