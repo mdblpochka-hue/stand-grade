@@ -96,12 +96,10 @@ const CRAFT_MIN_ITEMS = 3
 const CRAFT_MAX_ITEMS = 10
 const CRAFT_PROFIT_CHANCE = 1 / 3
 const BATTLE_ROUND_OPTIONS = [1, 3, 5]
-// Реактор: 5 попыток, ручной шанс и встроенный апгрейд.
-const REACTOR_ATTEMPTS = 5
-const REACTOR_MIN_CHANCE = 5
-const REACTOR_MAX_CHANCE = 80
-const REACTOR_MAX_ITEMS = 7
-const REACTOR_EDGE = 0.9
+// Глифы: 5 перекрутов дропа и апгрейды x2/x3/x5/x10.
+const GLYPH_REROLLS = 5
+const GLYPH_UPGRADE_MULTIPLIERS = [2, 3, 5, 10]
+const GLYPH_UPGRADE_EDGE = 90
 // Заявки: голда сверх дневного лимита и история заявок.
 const MAX_GOLD_REQUEST = Math.max(1000, Number(process.env.MAX_GOLD_REQUEST) || 100000)
 const APPLICATION_HISTORY_LIMIT = 500
@@ -122,11 +120,10 @@ const SECURITY_VIOLATION_WINDOW_MS = 5 * 60 * 1000
 const SECURITY_SENSITIVE_PATHS = new Set([
   '/api/open-case',
   '/api/open-glyph',
-  '/api/reactor/start',
-  '/api/reactor/reroll',
-  '/api/reactor/take',
-  '/api/reactor/sell',
-  '/api/reactor/upgrade',
+  '/api/glyph/reroll',
+  '/api/glyph/collect',
+  '/api/glyph/sell',
+  '/api/glyph/upgrade',
   '/api/upgrade',
   '/api/craft',
   '/api/case-battle',
@@ -1143,7 +1140,7 @@ function makeSeedUser(username, password, role, balance) {
     activatedPromos: [],
     promoSeenAt: null,
     depositBoost: null,
-    reactor: null,
+    glyphDrop: null,
     createdAt: new Date().toISOString(),
   }
 }
@@ -1194,8 +1191,9 @@ function defaultState() {
 
 function migrateUser(user) {
   user.tokenVersion = Math.max(0, Math.trunc(Number(user.tokenVersion) || 0))
-  if (!('reactor' in user)) user.reactor = null
-  if (user.reactor && (!user.reactor.id || !user.reactor.currentDrop)) user.reactor = null
+  if (!('glyphDrop' in user)) user.glyphDrop = null
+  if (user.glyphDrop && (!user.glyphDrop.id || !user.glyphDrop.currentDrop)) user.glyphDrop = null
+  delete user.reactor
   if (!Array.isArray(user.inventory)) user.inventory = []
   user.inventory = user.inventory
     .map((entry) => {
@@ -1815,13 +1813,7 @@ function publicPity(user) {
   return result
 }
 
-function clampReactorChance(value) {
-  const number = Number(value)
-  if (!Number.isFinite(number)) return 35
-  return Math.max(REACTOR_MIN_CHANCE, Math.min(REACTOR_MAX_CHANCE, Math.round(number * 10) / 10))
-}
-
-function makeReactorPool(targetValue) {
+function makeValuePool(targetValue) {
   const target = Math.max(1, Number(targetValue) || 1)
   const min = Math.max(1, target * 0.35)
   const max = Math.max(min + 1, target * 2.4)
@@ -1839,46 +1831,28 @@ function makeReactorPool(targetValue) {
   return entries.length ? entries : [...SKINS].slice(0, 20).map((skin) => [skin.id, 1])
 }
 
-function rollReactorDrop(spent, chance) {
-  const normalizedChance = clampReactorChance(chance)
-  const roll = crypto.randomInt(0, 10000) / 100
-  const won = roll < normalizedChance
-  const target = won
-    ? Math.max(1, (spent / (normalizedChance / 100)) * REACTOR_EDGE)
-    : Math.max(1, spent * 0.25)
-  const pool = makeReactorPool(target)
-  const skin = weightedPickFrom(pool)
-  return {
-    skin,
-    won,
-    roll,
-    chance: normalizedChance,
-    targetValue: roundGold(target),
-  }
-}
-
-function publicReactor(user) {
-  const session = user.reactor
-  if (!session || !session.currentDrop) return null
+function publicGlyphDrop(user) {
+  const session = user.glyphDrop
+  if (!session?.currentDrop) return null
   const drop = SKIN_BY_ID.get(session.currentDrop.id) || session.currentDrop
   const spent = roundGold(Math.max(0, Number(session.spent) || 0))
   const net = roundGold(drop.price - spent)
   return {
     id: session.id,
+    deckId: session.deckId,
+    deckName: session.deckName,
     spent,
-    attemptsLeft: Math.max(0, Math.min(REACTOR_ATTEMPTS, Math.trunc(Number(session.attemptsLeft) || 0))),
-    attemptsTotal: REACTOR_ATTEMPTS,
-    chance: Number(session.chance) || REACTOR_MIN_CHANCE,
-    won: Boolean(session.won),
-    roll: Number(session.roll) || 0,
-    rollId: session.rollId || null,
-    targetValue: Number(session.targetValue) || 0,
+    attemptsLeft: Math.max(0, Math.min(GLYPH_REROLLS, Math.trunc(Number(session.attemptsLeft) || 0))),
+    attemptsTotal: GLYPH_REROLLS,
     currentDrop: { ...drop },
     net,
     netPercent: spent > 0 ? roundGold((net / spent) * 100) : 0,
-    startedAt: session.startedAt || null,
-    minChance: REACTOR_MIN_CHANCE,
-    maxChance: REACTOR_MAX_CHANCE,
+    rollId: session.rollId || null,
+    createdAt: session.createdAt || null,
+    multipliers: GLYPH_UPGRADE_MULTIPLIERS.map((multiplier) => ({
+      multiplier,
+      chance: Math.round((GLYPH_UPGRADE_EDGE / multiplier) * 10) / 10,
+    })),
   }
 }
 
@@ -1902,7 +1876,7 @@ function publicUser(user) {
     unlimitedFreeCase: isAdmin,
     dailyLimit: daily,
     depositBoost: user.depositBoost || null,
-    reactor: publicReactor(user),
+    glyphDrop: publicGlyphDrop(user),
     createdAt: user.createdAt,
     serverTime: new Date().toISOString(),
   }
@@ -2303,11 +2277,10 @@ app.use(
   [
     '/api/open-case',
     '/api/open-glyph',
-    '/api/reactor/start',
-    '/api/reactor/reroll',
-    '/api/reactor/take',
-    '/api/reactor/sell',
-    '/api/reactor/upgrade',
+    '/api/glyph/reroll',
+    '/api/glyph/collect',
+    '/api/glyph/sell',
+    '/api/glyph/upgrade',
     '/api/upgrade',
     '/api/craft',
     '/api/case-battle',
@@ -2624,6 +2597,9 @@ app.post('/api/open-glyph', auth, (req, res) => {
   if (!deck) return sendError(res, 404, 'GLYPH_NOT_FOUND', 'Печать не найдена')
 
   const user = req.user
+  if (user.glyphDrop) {
+    return sendError(res, 409, 'GLYPH_DROP_ACTIVE', 'Сначала закрой текущий дроп глифа')
+  }
   if (user.balance + 1e-9 < deck.price) {
     return sendError(res, 400, 'INSUFFICIENT_FUNDS', 'Недостаточно голды для открытия глифа', {
       user: publicUser(user),
@@ -2632,201 +2608,120 @@ app.post('/api/open-glyph', auth, (req, res) => {
   }
 
   const winner = weightedPickFrom(deck.pool)
-  const entry = makeInventoryEntry(winner)
-  user.inventory.unshift(entry)
   user.balance = roundGold(user.balance - deck.price)
-  pushCaseHistory(user, { id: deck.id, name: `Глиф · ${deck.name}` }, winner, entry.instanceId)
-  pushLiveDrop(user, winner, 'case')
+  user.glyphDrop = {
+    id: crypto.randomUUID(),
+    deckId: deck.id,
+    deckName: deck.name,
+    spent: deck.price,
+    attemptsLeft: GLYPH_REROLLS,
+    currentDrop: { ...winner },
+    rollId: crypto.randomUUID(),
+    createdAt: new Date().toISOString(),
+  }
   saveState()
 
   res.json({
     ok: true,
     deck: deck.payload,
-    winner: { ...winner, instanceId: entry.instanceId, obtainedAt: entry.obtainedAt },
+    glyphDrop: publicGlyphDrop(user),
+    winner: { ...winner },
     user: publicUser(user),
     daily: buildDaily(),
-    feedEntry: liveFeed[0],
     message: `Глиф раскрыт: ${winner.name}`,
   })
 })
 
 /* ------------------------------------------------------------------ */
-/*  Reactor: 5 rerolls, manual chance and inline upgrade              */
+/*  Glyph drop: 5 rerolls, collect/sell and x2/x3/x5/x10 upgrade      */
 /* ------------------------------------------------------------------ */
 
-app.post('/api/reactor/start', auth, (req, res) => {
+app.post('/api/glyph/reroll', auth, (req, res) => {
   const user = req.user
-  if (user.reactor) {
-    return sendError(res, 409, 'REACTOR_ACTIVE', 'Реактор уже запущен')
-  }
-
-  const rawIds = Array.isArray(req.body?.instanceIds)
-    ? req.body.instanceIds.map(String)
-    : []
-  const instanceIds = [...new Set(rawIds)]
-  if (!instanceIds.length || instanceIds.length > REACTOR_MAX_ITEMS) {
-    return sendError(
-      res,
-      400,
-      'BAD_SELECTION',
-      `Выберите от 1 до ${REACTOR_MAX_ITEMS} глифов`,
-    )
-  }
-
-  const entries = instanceIds.map((instanceId) =>
-    user.inventory.find((entry) => entry.instanceId === instanceId),
-  )
-  if (entries.some((entry) => !entry)) {
-    return sendError(res, 404, 'ITEM_NOT_FOUND', 'Один из глифов не найден в инвентаре')
-  }
-  const skins = entries.map((entry) => SKIN_BY_ID.get(entry.skinId))
-  if (skins.some((skin) => !skin)) {
-    return sendError(res, 404, 'SKIN_NOT_FOUND', 'Скин не найден в каталоге')
-  }
-
-  const spent = roundGold(skins.reduce((sum, skin) => sum + skin.price, 0))
-  if (spent <= 0) return sendError(res, 400, 'BAD_SELECTION', 'Стоимость глифов должна быть больше нуля')
-
-  const chance = clampReactorChance(req.body?.chance)
-  user.inventory = user.inventory.filter((entry) => !instanceIds.includes(entry.instanceId))
-  const drop = rollReactorDrop(spent, chance)
-  user.reactor = {
-    id: crypto.randomUUID(),
-    spent,
-    attemptsLeft: REACTOR_ATTEMPTS,
-    chance: drop.chance,
-    won: drop.won,
-    roll: drop.roll,
-    rollId: crypto.randomUUID(),
-    targetValue: drop.targetValue,
-    currentDrop: { ...drop.skin },
-    startedAt: new Date().toISOString(),
-  }
-  saveState()
-
-  return res.json({
-    ok: true,
-    reactor: publicReactor(user),
-    user: publicUser(user),
-    daily: buildDaily(),
-    message: `Реактор запущен: ${drop.skin.name}`,
-  })
-})
-
-app.post('/api/reactor/reroll', auth, (req, res) => {
-  const user = req.user
-  const session = user.reactor
-  if (!session) return sendError(res, 409, 'NO_REACTOR', 'Реактор не запущен')
+  const session = user.glyphDrop
+  if (!session) return sendError(res, 409, 'NO_GLYPH_DROP', 'Сначала открой глиф')
   const attemptsLeft = Math.max(0, Math.trunc(Number(session.attemptsLeft) || 0))
   if (attemptsLeft <= 0) {
-    return sendError(res, 400, 'NO_ATTEMPTS', 'Попытки закончились — забери или продай последний дроп')
+    return sendError(res, 400, 'NO_ATTEMPTS', 'Перекруты закончились — забери, продай или отправь дроп в апгрейд')
   }
+  const deck = GLYPH_BY_ID.get(session.deckId)
+  if (!deck) return sendError(res, 404, 'GLYPH_NOT_FOUND', 'Печать не найдена')
 
-  const chance = clampReactorChance(req.body?.chance ?? session.chance)
-  const drop = rollReactorDrop(session.spent, chance)
+  const winner = weightedPickFrom(deck.pool)
   session.attemptsLeft = attemptsLeft - 1
-  session.chance = drop.chance
-  session.won = drop.won
-  session.roll = drop.roll
+  session.currentDrop = { ...winner }
   session.rollId = crypto.randomUUID()
-  session.targetValue = drop.targetValue
-  session.currentDrop = { ...drop.skin }
   saveState()
 
   return res.json({
     ok: true,
-    reactor: publicReactor(user),
+    deck: deck.payload,
+    glyphDrop: publicGlyphDrop(user),
+    winner: { ...winner },
     user: publicUser(user),
     daily: buildDaily(),
-    message: `Перекрут: ${drop.skin.name}`,
+    message: `Перекрут: ${winner.name}`,
   })
 })
 
-app.post('/api/reactor/take', auth, (req, res) => {
+app.post('/api/glyph/collect', auth, (req, res) => {
   const user = req.user
-  const session = user.reactor
-  if (!session?.currentDrop) return sendError(res, 409, 'NO_REACTOR', 'Реактор не запущен')
+  const session = user.glyphDrop
+  if (!session?.currentDrop) return sendError(res, 409, 'NO_GLYPH_DROP', 'Сначала открой глиф')
   const skin = SKIN_BY_ID.get(session.currentDrop.id) || session.currentDrop
   const entry = makeInventoryEntry(skin)
   user.inventory.unshift(entry)
-  pushCaseHistory(user, { id: 'reactor', name: 'Реактор' }, skin, entry.instanceId)
+  pushCaseHistory(user, { id: 'glyph-drop', name: `Глиф · ${session.deckName}` }, skin, entry.instanceId)
   pushLiveDrop(user, skin, 'case')
   const net = roundGold(skin.price - session.spent)
-  user.reactor = null
+  user.glyphDrop = null
   saveState()
 
   return res.json({
     ok: true,
-    reactor: null,
+    glyphDrop: null,
+    wonItem: { ...skin, instanceId: entry.instanceId, obtainedAt: entry.obtainedAt },
     user: publicUser(user),
     daily: buildDaily(),
-    message: `${skin.name} забран в инвентарь · ${net >= 0 ? 'окуп' : 'минус'} ${formatGold(Math.abs(net))}`,
+    message: `${skin.name} забран · ${net >= 0 ? 'окуп' : 'минус'} ${formatGold(Math.abs(net))}`,
   })
 })
 
-app.post('/api/reactor/sell', auth, (req, res) => {
+app.post('/api/glyph/sell', auth, (req, res) => {
   const user = req.user
-  const session = user.reactor
-  if (!session?.currentDrop) return sendError(res, 409, 'NO_REACTOR', 'Реактор не запущен')
+  const session = user.glyphDrop
+  if (!session?.currentDrop) return sendError(res, 409, 'NO_GLYPH_DROP', 'Сначала открой глиф')
   const skin = SKIN_BY_ID.get(session.currentDrop.id) || session.currentDrop
   const net = roundGold(skin.price - session.spent)
   user.balance = roundGold(user.balance + skin.price)
-  user.reactor = null
+  user.glyphDrop = null
   saveState()
 
   return res.json({
     ok: true,
-    reactor: null,
+    glyphDrop: null,
     user: publicUser(user),
     daily: buildDaily(),
     message: `Продано за ${formatGold(skin.price)} · ${net >= 0 ? 'окуп' : 'минус'} ${formatGold(Math.abs(net))}`,
   })
 })
 
-app.post('/api/reactor/upgrade', auth, (req, res) => {
+app.post('/api/glyph/upgrade', auth, (req, res) => {
   const user = req.user
-  const session = user.reactor
-  if (!session?.currentDrop) return sendError(res, 409, 'NO_REACTOR', 'Реактор не запущен')
+  const session = user.glyphDrop
+  if (!session?.currentDrop) return sendError(res, 409, 'NO_GLYPH_DROP', 'Сначала открой глиф')
+
+  const multiplier = Math.trunc(Number(req.body?.multiplier))
+  if (!GLYPH_UPGRADE_MULTIPLIERS.includes(multiplier)) {
+    return sendError(res, 400, 'BAD_MULTIPLIER', 'Доступны апгрейды x2, x3, x5 и x10')
+  }
 
   const baseSkin = SKIN_BY_ID.get(session.currentDrop.id) || session.currentDrop
-  const targetSkin = SKIN_BY_ID.get(String(req.body?.targetSkinId || ''))
-  if (!targetSkin) return sendError(res, 404, 'SKIN_NOT_FOUND', 'Целевой скин не найден')
-
-  const baseValue = roundGold(Number(baseSkin.price) || 0)
-  if (targetSkin.price <= baseValue) {
-    return sendError(res, 400, 'BAD_TARGET', 'Цель должна быть дороже текущего дропа')
-  }
-
-  const desiredChance = clampReactorChance(req.body?.chance)
-  const naturalChance = Math.min(
-    REACTOR_MAX_CHANCE,
-    (baseValue / targetSkin.price) * 90,
-  )
-  const maxChance = Math.min(90, ((baseValue + user.balance) / targetSkin.price) * 90)
-  if (maxChance < REACTOR_MIN_CHANCE) {
-    return sendError(res, 400, 'TARGET_TOO_EXPENSIVE', 'Цель слишком дорогая для текущего баланса', {
-      maxChance: roundGold(maxChance),
-    })
-  }
-
-  const requestedChance = Math.max(naturalChance, Math.min(desiredChance, maxChance))
-  const chance = roundGold(Math.max(1, Math.min(90, requestedChance)))
-  const requiredBoost = roundGold(
-    Math.max(0, targetSkin.price * (chance / 90) - baseValue),
-  )
-  if (requiredBoost > user.balance + 1e-9) {
-    return sendError(
-      res,
-      400,
-      'INSUFFICIENT_FUNDS',
-      `Для шанса ${formatGold(chance)}% нужно ${formatGold(requiredBoost)} G доплаты`,
-      { maxChance: roundGold(maxChance), requiredBoost },
-    )
-  }
-
+  const targetValue = Math.max(1, baseSkin.price * multiplier)
+  const targetSkin = weightedPickFrom(makeValuePool(targetValue))
+  const chance = Math.round((GLYPH_UPGRADE_EDGE / multiplier) * 10) / 10
   const roll = crypto.randomInt(0, 10000) / 100
   const won = roll < chance
-  user.balance = roundGold(user.balance - requiredBoost)
 
   let compensation = 0
   let wonItem = null
@@ -2834,37 +2729,43 @@ app.post('/api/reactor/upgrade', auth, (req, res) => {
     const entry = makeInventoryEntry(targetSkin)
     user.inventory.unshift(entry)
     wonItem = { ...targetSkin, instanceId: entry.instanceId, obtainedAt: entry.obtainedAt }
-    pushCaseHistory(user, { id: 'reactor', name: 'Реактор · Апгрейд' }, targetSkin, entry.instanceId)
+    pushCaseHistory(
+      user,
+      { id: 'glyph-drop', name: `Глиф · ${session.deckName} · x${multiplier}` },
+      targetSkin,
+      entry.instanceId,
+    )
     pushLiveDrop(user, targetSkin, 'upgrade')
   } else {
-    compensation = roundGold(baseValue * (0.05 + crypto.randomInt(0, 501) / 10000))
+    compensation = roundGold(baseSkin.price * (0.05 + crypto.randomInt(0, 501) / 10000))
     user.balance = roundGold(user.balance + compensation)
   }
 
   const sessionSpent = roundGold(Number(session.spent) || 0)
   const net = won
-    ? roundGold(targetSkin.price - sessionSpent - requiredBoost)
-    : roundGold(compensation - sessionSpent - requiredBoost)
-  user.reactor = null
+    ? roundGold(targetSkin.price - sessionSpent)
+    : roundGold(compensation - sessionSpent)
+  user.glyphDrop = null
   saveState()
 
   return res.json({
     ok: true,
     won,
+    multiplier,
     chance,
     roll,
-    requiredBoost,
-    compensation,
-    wonItem,
     baseSkin,
     targetSkin,
+    targetValue: roundGold(targetValue),
+    wonItem,
+    compensation,
     sessionSpent,
     net,
     user: publicUser(user),
     daily: buildDaily(),
     message: won
-      ? `Апгрейд успешен: ${targetSkin.name}`
-      : `Апгрейд не удался${compensation > 0 ? ` · компенсация +${formatGold(compensation)}` : ''}`,
+      ? `x${multiplier} апгрейд успешен: ${targetSkin.name}`
+      : `x${multiplier} апгрейд не удался${compensation > 0 ? ` · компенсация +${formatGold(compensation)}` : ''}`,
   })
 })
 

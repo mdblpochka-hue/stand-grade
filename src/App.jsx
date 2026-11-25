@@ -1050,7 +1050,6 @@ const NAV_ITEMS = [
   { id: 'upgrade', label: 'Апгрейд', icon: 'refresh' },
   { id: 'cases', label: 'Кейсы', icon: 'box' },
   { id: 'glyphs', label: 'Глифы', icon: 'cards' },
-  { id: 'reactor', label: 'Реактор', icon: 'bolt' },
   { id: 'craft', label: 'Крафт', icon: 'sparkles' },
   { id: 'battle', label: 'Битва', icon: 'flame' },
   { id: 'promos', label: 'Промокоды', icon: 'ticket' },
@@ -1058,7 +1057,7 @@ const NAV_ITEMS = [
   { id: 'inventory', label: 'Инвентарь', icon: 'archive' },
 ]
 
-const SECTION_IDS = ['cases', 'glyphs', 'reactor', 'craft', 'battle', 'upgrade', 'promos', 'requests', 'inventory', 'settings']
+const SECTION_IDS = ['cases', 'glyphs', 'craft', 'battle', 'upgrade', 'promos', 'requests', 'inventory', 'settings']
 
 function readSectionFromHash() {
   if (typeof window === 'undefined') return 'cases'
@@ -1294,17 +1293,6 @@ function Header({
                     </div>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenuOpen(false)
-                    onNavigate('reactor')
-                  }}
-                  className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] font-bold text-white/60 transition hover:bg-white/[0.05] hover:text-white"
-                >
-                  <Icon name="bolt" size={14} />
-                  Реактор
-                </button>
                 <button
                   type="button"
                   onClick={() => {
@@ -1985,48 +1973,51 @@ function GlyphCardBack({ deck, className = '' }) {
 }
 
 function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
-  const [activeDeck, setActiveDeck] = useState(null)
-  const [revealed, setRevealed] = useState(null)
-  const [flipped, setFlipped] = useState(false)
-  const [opening, setOpening] = useState(false)
+  const session = user.glyphDrop || null
+  const [activeDeckId, setActiveDeckId] = useState(null)
+  const [modalOpen, setModalOpen] = useState(false)
+  const [revealed, setRevealed] = useState(false)
+  const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
-  const activeDeckRef = useRef(null)
+  const [upgradeMultiplier, setUpgradeMultiplier] = useState(null)
+  const [upgradeResult, setUpgradeResult] = useState(null)
+  const [upgradeBusy, setUpgradeBusy] = useState(false)
+  const [upgradeError, setUpgradeError] = useState('')
+  const actionRef = useRef(false)
+  const duration = fast ? 320 : 650
 
-  const flipDuration = fast ? 320 : 650
+  const activeDeck =
+    glyphs.find((deck) => deck.id === (session?.deckId || activeDeckId)) || null
 
-  function openDeck(deck) {
-    setActiveDeck(deck)
-    activeDeckRef.current = deck
-    setRevealed(null)
-    setFlipped(false)
-    setError('')
+  useEffect(() => {
+    if (!session?.rollId) return undefined
+    setRevealed(false)
+    const timer = setTimeout(() => {
+      setRevealed(true)
+      if (session.currentDrop) playCaseResult(session.currentDrop.rarity)
+    }, duration + 100)
+    return () => clearTimeout(timer)
+  }, [session?.rollId, duration, session?.currentDrop?.rarity])
+
+  function closeModal() {
+    setModalOpen(false)
+    setUpgradeResult(null)
+    setUpgradeMultiplier(null)
+    setUpgradeError('')
   }
 
-  function closeDeck() {
-    setActiveDeck(null)
-    activeDeckRef.current = null
-    setRevealed(null)
-    setFlipped(false)
-    setOpening(false)
-    setError('')
-  }
+  useEscape(closeModal, modalOpen)
 
-  useEscape(closeDeck, Boolean(activeDeck))
-
-  async function openGlyph() {
-    const deck = activeDeck
-    if (!deck || opening) return
+  async function startDeck(deck) {
+    if (!deck || actionRef.current || busy) return
     if (user.balance + 1e-9 < deck.price) {
-      setError('Недостаточно голды для этой печати')
+      onToast('Недостаточно G для этой печати', 'error')
       return
     }
-
-    unlockAudio()
-    setOpening(true)
+    actionRef.current = true
+    setBusy('open')
     setError('')
-    setRevealed(null)
-    setFlipped(false)
-
+    unlockAudio()
     try {
       const data = await apiRequest('/api/open-glyph', {
         method: 'POST',
@@ -2034,26 +2025,145 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
         body: { deckId: deck.id },
       })
       onUpdate(data)
-      if (activeDeckRef.current?.id !== deck.id) return
-      setRevealed(data.winner)
-      setOpening(false)
-      requestAnimationFrame(() => setFlipped(true))
-      playCaseResult(data.winner.rarity)
-      onToast(data.message, 'success', 'Глиф раскрыт')
+      setActiveDeckId(deck.id)
+      setModalOpen(true)
+      setRevealed(false)
+      setUpgradeResult(null)
+      setUpgradeMultiplier(null)
+      setUpgradeError('')
     } catch (requestError) {
-      setOpening(false)
       setError(requestError.message)
       onToast(requestError.message, 'error')
       if (requestError.data?.user) onUpdate(requestError.data)
+    } finally {
+      setBusy('')
+      actionRef.current = false
     }
   }
+
+  function openDeck(deck) {
+    if (session) {
+      setActiveDeckId(session.deckId)
+      setModalOpen(true)
+      setRevealed(true)
+      return
+    }
+    startDeck(deck)
+  }
+
+  function continueDrop() {
+    if (!session) return
+    setActiveDeckId(session.deckId)
+    setModalOpen(true)
+    setRevealed(true)
+    setUpgradeResult(null)
+    setUpgradeMultiplier(null)
+    setUpgradeError('')
+  }
+
+  async function rerollDrop() {
+    if (!session || session.attemptsLeft <= 0 || actionRef.current || busy) return
+    actionRef.current = true
+    setBusy('reroll')
+    setError('')
+    unlockAudio()
+    try {
+      const data = await apiRequest('/api/glyph/reroll', { method: 'POST', token })
+      onUpdate(data)
+      setUpgradeResult(null)
+      setUpgradeMultiplier(null)
+      setUpgradeError('')
+    } catch (requestError) {
+      setError(requestError.message)
+      onToast(requestError.message, 'error')
+      if (requestError.data?.user) onUpdate(requestError.data)
+    } finally {
+      setBusy('')
+      actionRef.current = false
+    }
+  }
+
+  async function collectDrop() {
+    if (!session || actionRef.current || busy) return
+    actionRef.current = true
+    setBusy('collect')
+    setError('')
+    try {
+      const data = await apiRequest('/api/glyph/collect', { method: 'POST', token })
+      onUpdate(data)
+      playCoin()
+      onToast(data.message, 'success', 'Дроп забран')
+      closeModal()
+    } catch (requestError) {
+      setError(requestError.message)
+      onToast(requestError.message, 'error')
+      if (requestError.data?.user) onUpdate(requestError.data)
+    } finally {
+      setBusy('')
+      actionRef.current = false
+    }
+  }
+
+  async function sellDrop() {
+    if (!session || actionRef.current || busy) return
+    actionRef.current = true
+    setBusy('sell')
+    setError('')
+    try {
+      const data = await apiRequest('/api/glyph/sell', { method: 'POST', token })
+      onUpdate(data)
+      playCoin()
+      onToast(data.message, 'success', 'Дроп продан')
+      closeModal()
+    } catch (requestError) {
+      setError(requestError.message)
+      onToast(requestError.message, 'error')
+      if (requestError.data?.user) onUpdate(requestError.data)
+    } finally {
+      setBusy('')
+      actionRef.current = false
+    }
+  }
+
+  async function runUpgrade(multiplier) {
+    if (!session || upgradeBusy || actionRef.current) return
+    actionRef.current = true
+    setUpgradeBusy(true)
+    setUpgradeMultiplier(multiplier)
+    setUpgradeError('')
+    setUpgradeResult(null)
+    unlockAudio()
+    try {
+      const data = await apiRequest('/api/glyph/upgrade', {
+        method: 'POST',
+        token,
+        body: { multiplier },
+      })
+      onUpdate(data)
+      setUpgradeResult(data)
+      playUpgradeResult(data.won)
+      onToast(data.message, data.won ? 'success' : 'error')
+    } catch (requestError) {
+      setUpgradeError(requestError.message)
+      onToast(requestError.message, 'error')
+      if (requestError.data?.user) onUpdate(requestError.data)
+    } finally {
+      setUpgradeBusy(false)
+      actionRef.current = false
+    }
+  }
+
+  const drop = session?.currentDrop || null
+  const dropMeta = drop ? RARITY[drop.rarity] || RARITY.Common : RARITY.Common
+  const net = Number(session?.net) || 0
+  const netPercent = Number(session?.netPercent) || 0
 
   return (
     <section id="glyphs" className="pt-10 sm:pt-14">
       <SectionHeading
         eyebrow="Glyph cards"
         title="Глифы"
-        description="Печати вероятности: выбери колоду, раскрой карту и забери скин в инвентарь. Чем дороже печать — тем выше шанс на редкий глиф."
+        description="Открой печать, меняй дроп до пяти раз, а затем забери, продай или отправь скин в апгрейд x2 / x3 / x5 / x10."
         action={
           <span className="chip !border-[#b58bff]/20 !text-[#d7c4ff]/75">
             <Icon name="cards" size={11} />
@@ -2061,6 +2171,33 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
           </span>
         }
       />
+
+      {error && (
+        <div className="mb-3 flex items-start gap-2 rounded-xl border border-[#ff7189]/20 bg-[#ff7189]/[0.06] p-3 text-[9px] leading-relaxed text-[#ff9aac]">
+          <Icon name="alert" size={13} className="mt-0.5 shrink-0" />
+          {error}
+        </div>
+      )}
+
+      {session && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-acid/20 bg-acid/[0.05] px-4 py-3">
+          <div>
+            <div className="text-[8px] font-black uppercase tracking-[0.16em] text-acid/65">
+              Активный дроп · {session.deckName}
+            </div>
+            <div className="mt-1 text-[11px] font-bold text-white/75">
+              {session.currentDrop?.name} · осталось перекрутов {session.attemptsLeft}/{session.attemptsTotal || 5}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={continueDrop}
+            className="rounded-lg border border-acid/30 bg-acid/[0.09] px-3 py-2 text-[8px] font-black uppercase tracking-[0.08em] text-acid transition hover:bg-acid/[0.16]"
+          >
+            Продолжить
+          </button>
+        </div>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {glyphs.map((deck, index) => {
@@ -2078,7 +2215,10 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                   openDeck(deck)
                 }
               }}
-              className="group relative cursor-pointer overflow-hidden rounded-[22px] border border-white/[0.075] bg-panel transition duration-300 hover:-translate-y-1 hover:border-white/[0.15] hover:shadow-[0_24px_70px_rgba(0,0,0,.38)] fade-up"
+              className={cx(
+                'group relative cursor-pointer overflow-hidden rounded-[22px] border border-white/[0.075] bg-panel transition duration-300 hover:-translate-y-1 hover:border-white/[0.15] hover:shadow-[0_24px_70px_rgba(0,0,0,.38)] fade-up',
+                session && session.deckId !== deck.id && 'opacity-60',
+              )}
               style={{ animationDelay: `${index * 45}ms` }}
             >
               <div className="relative h-[196px] overflow-hidden border-b border-white/[0.06] p-4">
@@ -2098,9 +2238,14 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
               </div>
 
               <div className="p-4">
-                <h3 className="font-display text-[16px] font-extrabold leading-tight tracking-[-0.03em] text-white">
-                  {deck.name}
-                </h3>
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="font-display text-[16px] font-extrabold leading-tight tracking-[-0.03em] text-white">
+                    {deck.name}
+                  </h3>
+                  <span className="rounded-md border border-white/[0.08] bg-white/[0.03] px-1.5 py-0.5 text-[7px] font-black uppercase tracking-[0.06em] text-white/35">
+                    5 перекрутов
+                  </span>
+                </div>
                 <p className="mt-1.5 text-[10px] font-medium text-white/30">{deck.subtitle}</p>
 
                 <div className="mt-3.5 flex h-1.5 gap-[2px] overflow-hidden rounded-full bg-white/[0.04]">
@@ -2133,18 +2278,21 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
         })}
       </div>
 
-      {activeDeck && (
+      {modalOpen && activeDeck && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-[#030604]/88 p-3 backdrop-blur-md"
           role="dialog"
           aria-modal="true"
           aria-label={`Глиф · ${activeDeck.name}`}
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeDeck()
+            if (event.target === event.currentTarget) closeModal()
           }}
         >
-          <div className="pop-in relative max-h-[92vh] w-full max-w-[420px] overflow-y-auto rounded-[26px] border border-white/[0.1] bg-[#0b120d] shadow-panel">
-            <div className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full blur-[70px]" style={{ backgroundColor: `${activeDeck.accent}22` }} />
+          <div className="pop-in relative max-h-[92vh] w-full max-w-[440px] overflow-y-auto rounded-[26px] border border-white/[0.1] bg-[#0b120d] shadow-panel">
+            <div
+              className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full blur-[70px]"
+              style={{ backgroundColor: `${activeDeck.accent}22` }}
+            />
             <div className="relative flex items-center justify-between gap-2 border-b border-white/[0.07] px-4 py-3">
               <div className="min-w-0">
                 <div className="text-[7px] font-black uppercase tracking-[0.18em]" style={{ color: activeDeck.accent }}>
@@ -2160,7 +2308,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                 </span>
                 <button
                   type="button"
-                  onClick={closeDeck}
+                  onClick={closeModal}
                   className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.09] text-white/45 transition hover:border-white/20 hover:text-white"
                   aria-label="Закрыть"
                 >
@@ -2170,93 +2318,211 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
             </div>
 
             <div className="relative p-4">
-              <div className="relative h-[330px] [perspective:1100px]">
-                <div
-                  className="relative h-full w-full transition-transform"
-                  style={{
-                    transformStyle: 'preserve-3d',
-                    transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
-                    transitionDuration: `${flipDuration}ms`,
-                    transitionTimingFunction: 'cubic-bezier(.2,.8,.2,1)',
-                  }}
-                >
-                  <div className="absolute inset-0 [backface-visibility:hidden]">
-                    <GlyphCardBack deck={activeDeck} className="h-full w-full" />
+              {upgradeResult ? (
+                <div>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="text-[8px] font-black uppercase tracking-[0.16em] text-white/30">
+                        Апгрейд x{upgradeResult.multiplier}
+                      </div>
+                      <div className={cx('mt-1 font-display text-[20px] font-black', upgradeResult.won ? 'text-acid' : 'text-[#ff9aac]')}>
+                        {upgradeResult.won ? 'Успех' : 'Провал'}
+                      </div>
+                      <div className="mt-1 text-[8px] font-semibold text-white/30">
+                        шанс {upgradeResult.chance}% · ролл {Number(upgradeResult.roll).toFixed(2)}%
+                      </div>
+                    </div>
+                    <div className={cx('rounded-xl border px-3 py-2 text-right', upgradeResult.net >= 0 ? 'border-acid/25 bg-acid/[0.06]' : 'border-[#ff5d7a]/25 bg-[#ff5d7a]/[0.06]')}>
+                      <div className="text-[7px] font-black uppercase tracking-[0.12em] text-white/25">Итог</div>
+                      <div className={cx('text-[13px] font-extrabold tabular-nums', upgradeResult.net >= 0 ? 'text-acid' : 'text-[#ff9aac]')}>
+                        {upgradeResult.net >= 0 ? '+' : '-'}
+                        {formatPrice(Math.abs(upgradeResult.net))}
+                      </div>
+                    </div>
                   </div>
-                  <div className="absolute inset-0 [backface-visibility:hidden]" style={{ transform: 'rotateY(180deg)' }}>
-                    {revealed ? (
-                      <div
-                        className="relative h-full w-full overflow-hidden rounded-2xl border bg-[#0d150f]"
-                        style={{ borderColor: `${(RARITY[revealed.rarity] || RARITY.Common).color}55` }}
-                      >
-                        <SkinVisual skin={revealed} className="h-[230px] w-full" showRarity={false} />
-                        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#050906] via-[#050906]/90 to-transparent p-4 pt-10">
-                          <div
-                            className="text-[8px] font-black uppercase tracking-[0.16em]"
-                            style={{ color: (RARITY[revealed.rarity] || RARITY.Common).color }}
-                          >
-                            {(RARITY[revealed.rarity] || RARITY.Common).label}
-                          </div>
-                          <div className="mt-1 text-[13px] font-extrabold leading-tight text-white">
-                            {revealed.name}
-                          </div>
-                          <div className="mt-1 text-[11px] font-extrabold tabular-nums text-acid">
-                            {formatPrice(revealed.price)}
+
+                  <div className="mt-3 flex flex-col items-center">
+                    <ProbabilityWheel
+                      chance={upgradeResult.chance}
+                      roll={upgradeResult.roll}
+                      size={210}
+                      duration={fast ? 500 : 1050}
+                      spinKey={upgradeResult.roll}
+                    >
+                      <span className="relative text-[7px] font-black uppercase tracking-[0.18em] text-white/28">шанс</span>
+                      <span className="relative mt-1 font-display text-[30px] font-black text-white">{Math.round(upgradeResult.chance)}%</span>
+                    </ProbabilityWheel>
+                  </div>
+
+                  <div className="mt-3 rounded-xl border border-white/[0.07] bg-black/20 p-3">
+                    {upgradeResult.won ? (
+                      <>
+                        <div className="text-[8px] font-black uppercase tracking-[0.14em] text-acid/70">Получен скин</div>
+                        <div className="mt-1 text-[12px] font-extrabold text-white">{upgradeResult.wonItem?.name || upgradeResult.targetSkin?.name}</div>
+                        <div className="mt-1 text-[11px] font-extrabold tabular-nums text-acid">
+                          {formatPrice(upgradeResult.wonItem?.price || upgradeResult.targetSkin?.price || 0)}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="text-[8px] font-black uppercase tracking-[0.14em] text-[#ff9aac]/70">Компенсация</div>
+                        <div className="mt-1 text-[12px] font-extrabold text-[#ff9aac]">+{formatPrice(upgradeResult.compensation || 0)}</div>
+                        <div className="mt-1 text-[8px] font-semibold text-white/28">Дроп сгорел, 5–10% стоимости вернулось на баланс.</div>
+                      </>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={closeModal}
+                    className="btn-acid mt-3 w-full !py-3 !text-[10px] uppercase tracking-[0.08em]"
+                  >
+                    Готово
+                  </button>
+                </div>
+              ) : session && drop ? (
+                <div>
+                  <div className="relative h-[300px] [perspective:1100px]">
+                    <div
+                      className="relative h-full w-full"
+                      style={{
+                        transformStyle: 'preserve-3d',
+                        transform: revealed ? 'rotateY(180deg)' : 'rotateY(0deg)',
+                        transition: `transform ${duration}ms cubic-bezier(.2,.8,.2,1)`,
+                      }}
+                    >
+                      <div className="absolute inset-0 [backface-visibility:hidden]">
+                        <GlyphCardBack deck={activeDeck} className="h-full w-full" />
+                      </div>
+                      <div className="absolute inset-0 [backface-visibility:hidden]" style={{ transform: 'rotateY(180deg)' }}>
+                        <div
+                          className="relative h-full w-full overflow-hidden rounded-2xl border bg-[#0d150f]"
+                          style={{
+                            borderColor: `${dropMeta.color}66`,
+                            boxShadow: `0 0 44px ${dropMeta.color}33`,
+                          }}
+                        >
+                          <SkinVisual skin={drop} className="h-[215px] w-full" showRarity={false} />
+                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#050906] via-[#050906]/90 to-transparent p-4 pt-10">
+                            <div className="flex items-end justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="text-[8px] font-black uppercase tracking-[0.16em]" style={{ color: dropMeta.color }}>
+                                  {dropMeta.label}
+                                </div>
+                                <div className="mt-1 truncate text-[13px] font-extrabold text-white">{drop.name}</div>
+                              </div>
+                              <div className="shrink-0 text-[13px] font-extrabold tabular-nums text-acid">{formatPrice(drop.price)}</div>
+                            </div>
                           </div>
                         </div>
                       </div>
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center rounded-2xl border border-white/[0.08] bg-black/30">
-                        <span className="spin-ring h-8 w-8 rounded-full border-2 border-acid/15 border-t-acid" />
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/[0.07] bg-black/20 px-3 py-2.5">
+                    <div>
+                      <div className="text-[7px] font-black uppercase tracking-[0.12em] text-white/25">Перекруты</div>
+                      <div key={session.attemptsLeft} className="glyph-attempt-pulse mt-0.5 font-display text-[18px] font-black tabular-nums text-white">
+                        {session.attemptsLeft}/{session.attemptsTotal || 5}
                       </div>
+                    </div>
+                    <div className={cx('rounded-lg border px-2.5 py-1.5 text-right', net >= 0 ? 'border-acid/25 bg-acid/[0.06]' : 'border-[#ff5d7a]/25 bg-[#ff5d7a]/[0.06]')}>
+                      <div className="text-[7px] font-black uppercase tracking-[0.1em] text-white/25">{net >= 0 ? 'Окуп' : 'Минус'}</div>
+                      <div className={cx('text-[10px] font-extrabold tabular-nums', net >= 0 ? 'text-acid' : 'text-[#ff9aac]')}>
+                        {net >= 0 ? '+' : '-'}{formatPrice(Math.abs(net))} ({netPercent >= 0 ? '+' : ''}{netPercent.toFixed(1)}%)
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={rerollDrop}
+                    disabled={Boolean(busy) || session.attemptsLeft <= 0 || !revealed}
+                    className="btn-acid mt-3 w-full !py-3 !text-[10px] uppercase tracking-[0.08em] disabled:opacity-40"
+                  >
+                    {busy === 'reroll' ? (
+                      <>
+                        <span className="spin-ring h-4 w-4 rounded-full border-2 border-[#041007]/30 border-t-[#041007]" />
+                        Меняем дроп...
+                      </>
+                    ) : session.attemptsLeft > 0 ? (
+                      <>
+                        <Icon name="refresh" size={14} />
+                        Перекрутить · {session.attemptsLeft}/{session.attemptsTotal || 5}
+                      </>
+                    ) : (
+                      'Перекруты закончились'
                     )}
+                  </button>
+
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={collectDrop}
+                      disabled={Boolean(busy) || !revealed}
+                      className="rounded-xl border border-acid/25 bg-acid/[0.07] px-2 py-2.5 text-[8px] font-black uppercase tracking-[0.08em] text-acid transition hover:bg-acid/[0.14] disabled:opacity-40"
+                    >
+                      Собрать
+                    </button>
+                    <button
+                      type="button"
+                      onClick={sellDrop}
+                      disabled={Boolean(busy) || !revealed}
+                      className="rounded-xl border border-[#ffcf4d]/25 bg-[#ffcf4d]/[0.06] px-2 py-2.5 text-[8px] font-black uppercase tracking-[0.08em] text-[#ffe6a3] transition hover:bg-[#ffcf4d]/[0.12] disabled:opacity-40"
+                    >
+                      Продать за {formatPrice(drop.price)}
+                    </button>
+                  </div>
+
+                  <div className="mt-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[7px] font-black uppercase tracking-[0.14em] text-white/30">Кинуть в апгрейд</span>
+                      <span className="text-[7px] font-semibold text-white/22">скин уйдёт в апгрейд</span>
+                    </div>
+                    <div className="mt-1.5 grid grid-cols-4 gap-1.5">
+                      {[2, 3, 5, 10].map((multiplier) => {
+                        const chance = Math.round((90 / multiplier) * 10) / 10
+                        return (
+                          <button
+                            key={multiplier}
+                            type="button"
+                            onClick={() => runUpgrade(multiplier)}
+                            disabled={upgradeBusy || !revealed}
+                            className="rounded-lg border border-[#b58bff]/25 bg-[#b58bff]/[0.07] px-1 py-2 text-center transition hover:bg-[#b58bff]/[0.14] disabled:opacity-40"
+                          >
+                            <div className="text-[11px] font-black text-[#d7c4ff]">x{multiplier}</div>
+                            <div className="text-[6.5px] font-bold text-white/30">{chance}%</div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {upgradeError && (
+                      <div className="mt-2 text-[8px] font-semibold text-[#ff9aac]">{upgradeError}</div>
+                    )}
+                    <div className="mt-2 text-center text-[7px] font-semibold leading-relaxed text-white/22">
+                      Апгрейд забирает текущий дроп. При провале скин сгорает, 5–10% вернётся на баланс.
+                    </div>
+                  </div>
+
+                  <div className="mt-2 text-center text-[7px] font-semibold text-white/20">
+                    {session.attemptsLeft > 0
+                      ? 'Старый дроп сгорает при каждом перекруте'
+                      : 'Перекруты закончились — собери, продай или отправь в апгрейд'}
                   </div>
                 </div>
-              </div>
-
-              {error && (
-                <div className="mt-3 rounded-xl border border-[#ff7189]/20 bg-[#ff7189]/[0.06] px-3 py-2 text-[9px] font-semibold text-[#ff9aac]">
-                  {error}
+              ) : (
+                <div className="flex min-h-[260px] flex-col items-center justify-center text-center">
+                  <Icon name="cards" size={28} className="text-white/20" />
+                  <div className="mt-2 text-[10px] font-bold text-white/35">Дроп закрыт</div>
+                  <button
+                    type="button"
+                    onClick={closeModal}
+                    className="mt-3 rounded-lg border border-white/[0.09] px-3 py-2 text-[8px] font-black uppercase tracking-[0.08em] text-white/45 hover:text-white"
+                  >
+                    Закрыть
+                  </button>
                 </div>
               )}
-
-              <div className="mt-3 flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={openGlyph}
-                  disabled={opening || user.balance + 1e-9 < activeDeck.price}
-                  className="btn-acid flex-1 !py-3 !text-[10px] uppercase tracking-[0.08em] disabled:opacity-40"
-                >
-                  {opening ? (
-                    <>
-                      <span className="spin-ring h-4 w-4 rounded-full border-2 border-[#041007]/30 border-t-[#041007]" />
-                      Тянем карту...
-                    </>
-                  ) : revealed ? (
-                    <>
-                      <Icon name="cards" size={14} />
-                      Ещё за {formatPrice(activeDeck.price)}
-                    </>
-                  ) : (
-                    <>
-                      <Icon name="cards" size={14} />
-                      Открыть за {formatPrice(activeDeck.price)}
-                    </>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={closeDeck}
-                  className="rounded-xl border border-white/[0.09] px-4 py-3 text-[9px] font-black uppercase tracking-[0.08em] text-white/50 transition hover:border-white/20 hover:text-white"
-                >
-                  Закрыть
-                </button>
-              </div>
-              <div className="mt-2 text-center text-[7.5px] font-semibold text-white/22">
-                {revealed
-                  ? 'Глиф уже добавлен в инвентарь'
-                  : 'Результат определяет сервер · шанс виден в разбивке печати'}
-              </div>
             </div>
           </div>
         </div>
@@ -2266,10 +2532,10 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Reactor (5 rerolls, manual chance, inline upgrade)                */
+/*  Probability wheel for glyph upgrades                              */
 /* ------------------------------------------------------------------ */
 
-function ReactorWheel({ chance = 35, roll = null, size = 230, duration = 1100, spinKey, children }) {
+function ProbabilityWheel({ chance = 35, roll = null, size = 230, duration = 1100, spinKey, children }) {
   const needleRef = useRef(null)
 
   useEffect(() => {
@@ -2332,813 +2598,6 @@ function ReactorWheel({ chance = 35, roll = null, size = 230, duration = 1100, s
         )}
       </div>
     </div>
-  )
-}
-
-function ReactorSection({ user, catalog, token, fast, onUpdate, onToast }) {
-  const session = user.reactor || null
-  const inventory = user.inventory || []
-  const wheelDuration = fast ? 560 : 1150
-  const [selectedIds, setSelectedIds] = useState([])
-  const [chance, setChance] = useState(35)
-  const [busy, setBusy] = useState('')
-  const [error, setError] = useState('')
-  const [launching, setLaunching] = useState(false)
-  const [launchSkins, setLaunchSkins] = useState([])
-  const [revealed, setRevealed] = useState(false)
-  const [upgradeOpen, setUpgradeOpen] = useState(false)
-  const [upgradeTargetId, setUpgradeTargetId] = useState(null)
-  const [upgradeChance, setUpgradeChance] = useState(35)
-  const [upgradeQuery, setUpgradeQuery] = useState('')
-  const [upgradeLimit, setUpgradeLimit] = useState(12)
-  const [upgradeBusy, setUpgradeBusy] = useState(false)
-  const [upgradeError, setUpgradeError] = useState('')
-  const [upgradeResult, setUpgradeResult] = useState(null)
-  const actionRef = useRef(false)
-  const upgradeActionRef = useRef(false)
-
-  const selectedSkins = useMemo(
-    () => inventory.filter((item) => selectedIds.includes(item.instanceId)),
-    [inventory, selectedIds],
-  )
-  const selectedValue = useMemo(
-    () => selectedSkins.reduce((sum, skin) => sum + skin.price, 0),
-    [selectedSkins],
-  )
-  const baseValue = Number(session?.currentDrop?.price) || 0
-  const net = Number(session?.net) || 0
-  const netPercent = Number(session?.netPercent) || 0
-  const upgradeTarget = catalog.find((skin) => skin.id === upgradeTargetId) || null
-  const naturalChance = upgradeTarget
-    ? Math.min(80, (baseValue / upgradeTarget.price) * 90)
-    : 0
-  const maxChance = upgradeTarget
-    ? Math.min(80, ((baseValue + user.balance) / upgradeTarget.price) * 90)
-    : 80
-  const upgradeActualChance = upgradeTarget
-    ? Math.max(naturalChance, Math.min(upgradeChance, maxChance))
-    : upgradeChance
-  const upgradeBoost = upgradeTarget
-    ? Math.max(0, upgradeTarget.price * (upgradeActualChance / 90) - baseValue)
-    : 0
-
-  const upgradeTargets = useMemo(() => {
-    const query = upgradeQuery.trim().toLowerCase()
-    return catalog
-      .filter(
-        (skin) =>
-          skin.price > baseValue &&
-          (!query || skin.name.toLowerCase().includes(query)),
-      )
-      .sort((a, b) => a.price - b.price)
-      .slice(0, upgradeLimit)
-  }, [catalog, baseValue, upgradeQuery, upgradeLimit])
-
-  useEffect(() => {
-    if (!session) return
-    setChance(session.chance)
-    setUpgradeOpen(false)
-    setUpgradeResult(null)
-    setUpgradeTargetId(null)
-    setUpgradeError('')
-  }, [session?.id])
-
-  useEffect(() => {
-    if (!session?.rollId) return undefined
-    setRevealed(false)
-    const timer = setTimeout(() => {
-      setRevealed(true)
-      if (session.currentDrop) playCaseResult(session.currentDrop.rarity)
-    }, wheelDuration + 120)
-    return () => clearTimeout(timer)
-  }, [session?.rollId, wheelDuration, session?.currentDrop?.rarity])
-
-  function toggleGlyph(item) {
-    if (busy) return
-    setSelectedIds((previous) => {
-      if (previous.includes(item.instanceId)) {
-        return previous.filter((id) => id !== item.instanceId)
-      }
-      if (previous.length >= 7) {
-        onToast('В реактор можно вложить до 7 глифов', 'info')
-        return previous
-      }
-      return [...previous, item.instanceId]
-    })
-  }
-
-  async function startReactor() {
-    if (busy || !selectedSkins.length || actionRef.current) return
-    actionRef.current = true
-    setBusy('start')
-    setError('')
-    unlockAudio()
-    setLaunchSkins(selectedSkins)
-    setLaunching(true)
-    try {
-      const data = await apiRequest('/api/reactor/start', {
-        method: 'POST',
-        token,
-        body: { instanceIds: selectedIds, chance },
-      })
-      await new Promise((resolve) => setTimeout(resolve, 820))
-      onUpdate(data)
-      setSelectedIds([])
-      setChance(data.reactor.chance)
-    } catch (requestError) {
-      setError(requestError.message)
-      onToast(requestError.message, 'error')
-      if (requestError.data?.user) onUpdate(requestError.data)
-    } finally {
-      setLaunching(false)
-      setBusy('')
-      actionRef.current = false
-    }
-  }
-
-  async function reroll() {
-    if (!session || busy || !revealed || session.attemptsLeft <= 0 || actionRef.current) return
-    actionRef.current = true
-    setBusy('reroll')
-    setError('')
-    unlockAudio()
-    try {
-      const data = await apiRequest('/api/reactor/reroll', {
-        method: 'POST',
-        token,
-        body: { chance },
-      })
-      onUpdate(data)
-      setChance(data.reactor.chance)
-    } catch (requestError) {
-      setError(requestError.message)
-      onToast(requestError.message, 'error')
-      if (requestError.data?.user) onUpdate(requestError.data)
-    } finally {
-      setBusy('')
-      actionRef.current = false
-    }
-  }
-
-  async function takeDrop() {
-    if (!session || busy || !revealed || actionRef.current) return
-    actionRef.current = true
-    setBusy('take')
-    setError('')
-    try {
-      const data = await apiRequest('/api/reactor/take', { method: 'POST', token })
-      onUpdate(data)
-      onToast(data.message, 'success', 'Дроп забран')
-      playCoin()
-    } catch (requestError) {
-      setError(requestError.message)
-      onToast(requestError.message, 'error')
-      if (requestError.data?.user) onUpdate(requestError.data)
-    } finally {
-      setBusy('')
-      actionRef.current = false
-    }
-  }
-
-  async function sellDrop() {
-    if (!session || busy || !revealed || actionRef.current) return
-    actionRef.current = true
-    setBusy('sell')
-    setError('')
-    try {
-      const data = await apiRequest('/api/reactor/sell', { method: 'POST', token })
-      onUpdate(data)
-      onToast(data.message, 'success', 'Дроп продан')
-      playCoin()
-    } catch (requestError) {
-      setError(requestError.message)
-      onToast(requestError.message, 'error')
-      if (requestError.data?.user) onUpdate(requestError.data)
-    } finally {
-      setBusy('')
-      actionRef.current = false
-    }
-  }
-
-  function openUpgrade() {
-    if (!session || !revealed) return
-    const ideal = baseValue / (35 / 90)
-    const preferred = [...catalog]
-      .filter((skin) => skin.price > baseValue)
-      .sort((a, b) => Math.abs(a.price - ideal) - Math.abs(b.price - ideal))[0]
-    setUpgradeOpen(true)
-    setUpgradeResult(null)
-    setUpgradeError('')
-    setUpgradeQuery('')
-    setUpgradeChance(35)
-    setUpgradeTargetId(preferred?.id || null)
-  }
-
-  function pickTargetForChance() {
-    const ideal = baseValue / (Math.max(5, upgradeChance) / 90)
-    const target = [...catalog]
-      .filter((skin) => skin.price > baseValue)
-      .sort((a, b) => Math.abs(a.price - ideal) - Math.abs(b.price - ideal))[0]
-    if (target) setUpgradeTargetId(target.id)
-  }
-
-  function closeUpgrade() {
-    setUpgradeOpen(false)
-    setUpgradeResult(null)
-    setUpgradeError('')
-    setUpgradeTargetId(null)
-  }
-
-  async function runUpgrade() {
-    if (!session || !upgradeTarget || upgradeBusy || upgradeActionRef.current) return
-    if (maxChance < naturalChance || maxChance < 5) {
-      setUpgradeError('Недостаточно G для апгрейда на эту цель')
-      return
-    }
-    upgradeActionRef.current = true
-    setUpgradeBusy(true)
-    setUpgradeError('')
-    unlockAudio()
-    try {
-      const data = await apiRequest('/api/reactor/upgrade', {
-        method: 'POST',
-        token,
-        body: {
-          targetSkinId: upgradeTarget.id,
-          chance: Math.round(upgradeActualChance * 10) / 10,
-        },
-      })
-      setUpgradeResult(data)
-      onUpdate(data)
-      playUpgradeResult(data.won)
-      onToast(data.message, data.won ? 'success' : 'error')
-    } catch (requestError) {
-      setUpgradeError(requestError.message)
-      onToast(requestError.message, 'error')
-      if (requestError.data?.user) onUpdate(requestError.data)
-    } finally {
-      setUpgradeBusy(false)
-      upgradeActionRef.current = false
-    }
-  }
-
-  function finishUpgrade() {
-    setUpgradeOpen(false)
-    setUpgradeResult(null)
-    setUpgradeError('')
-    setUpgradeTargetId(null)
-    setError('')
-  }
-
-  const attempts = session ? `${session.attemptsLeft}/${session.attemptsTotal || 5}` : '5/5'
-  const actionsLocked = Boolean(busy) || !revealed
-
-  return (
-    <section id="reactor" className="pt-10 sm:pt-14">
-      <SectionHeading
-        eyebrow="REACTOR · 5 REROLLS"
-        title="Реактор"
-        description="Вложи глифы, выставь шанс и крути до пяти раз. Не устроил дроп — перекручивай. На нуле попыток забери, продай или отправь текущий скин в апгрейд."
-        action={
-          <span className="chip !border-lime/20 !text-lime/75">
-            <Icon name="bolt" size={11} />
-            {attempts} попыток
-          </span>
-        }
-      />
-
-      {error && (
-        <div className="mb-3 flex items-start gap-2 rounded-xl border border-[#ff7189]/20 bg-[#ff7189]/[0.06] p-3 text-[9px] leading-relaxed text-[#ff9aac]">
-          <Icon name="alert" size={13} className="mt-0.5 shrink-0" />
-          {error}
-        </div>
-      )}
-
-      {upgradeResult ? (
-        <div className="relative overflow-hidden rounded-[24px] border border-white/[0.09] bg-[#0b120d] p-4 sm:p-6">
-          <div className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-acid/10 blur-[80px]" />
-          <div className="relative flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <div className="text-[8px] font-black uppercase tracking-[0.18em] text-acid/70">
-                Встроенный апгрейд · результат
-              </div>
-              <div className={cx('mt-1 font-display text-[24px] font-black tracking-[-0.04em]', upgradeResult.won ? 'text-acid' : 'text-[#ff9aac]')}>
-                {upgradeResult.won ? 'Апгрейд успешен' : 'Апгрейд не удался'}
-              </div>
-              <div className="mt-1 text-[9px] font-semibold text-white/32">
-                Шанс {upgradeResult.chance}% · ролл {Number(upgradeResult.roll).toFixed(2)}%
-              </div>
-            </div>
-            <div className={cx('rounded-xl border px-3 py-2 text-right', upgradeResult.net >= 0 ? 'border-acid/25 bg-acid/[0.06]' : 'border-[#ff5d7a]/25 bg-[#ff5d7a]/[0.06]')}>
-              <div className="text-[7px] font-black uppercase tracking-[0.12em] text-white/25">Итог сессии</div>
-              <div className={cx('text-[14px] font-extrabold tabular-nums', upgradeResult.net >= 0 ? 'text-acid' : 'text-[#ff9aac]')}>
-                {upgradeResult.net >= 0 ? '+' : '-'}
-                {formatPrice(Math.abs(upgradeResult.net))}
-              </div>
-            </div>
-          </div>
-
-          <div className="relative mt-4 grid gap-3 sm:grid-cols-[220px_1fr] sm:items-center">
-            <ReactorWheel chance={upgradeResult.chance} roll={upgradeResult.roll} size={200} duration={wheelDuration} spinKey={upgradeResult.roll}>
-              <span className="relative text-[7px] font-black uppercase tracking-[0.18em] text-white/28">шанс</span>
-              <span className="relative mt-1 font-display text-[32px] font-black text-white">{Math.round(upgradeResult.chance)}%</span>
-            </ReactorWheel>
-            <div>
-              {upgradeResult.won ? (
-                <div className="rounded-2xl border border-acid/25 bg-acid/[0.05] p-4">
-                  <div className="text-[8px] font-black uppercase tracking-[0.14em] text-acid/70">Получен скин</div>
-                  <div className="mt-1 text-[14px] font-extrabold text-white">{upgradeResult.wonItem?.name || upgradeResult.targetSkin?.name}</div>
-                  <div className="mt-1 text-[12px] font-extrabold tabular-nums text-acid">{formatPrice(upgradeResult.wonItem?.price || upgradeResult.targetSkin?.price || 0)}</div>
-                </div>
-              ) : (
-                <div className="rounded-2xl border border-[#ff5d7a]/20 bg-[#ff5d7a]/[0.05] p-4">
-                  <div className="text-[8px] font-black uppercase tracking-[0.14em] text-[#ff9aac]/70">Компенсация</div>
-                  <div className="mt-1 text-[14px] font-extrabold text-[#ff9aac]">+{formatPrice(upgradeResult.compensation || 0)}</div>
-                  <div className="mt-1 text-[9px] font-semibold text-white/30">Дроп сгорел, 5–10% стоимости вернулось на баланс.</div>
-                </div>
-              )}
-              <button
-                type="button"
-                onClick={finishUpgrade}
-                className="btn-acid mt-3 w-full !py-3 !text-[10px] uppercase tracking-[0.08em]"
-              >
-                Готово
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : upgradeOpen && session ? (
-        <div className="relative overflow-hidden rounded-[24px] border border-white/[0.09] bg-[#0b120d] p-4 sm:p-6">
-          <div className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-[#b58bff]/10 blur-[80px]" />
-          <div className="relative flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <div className="text-[8px] font-black uppercase tracking-[0.18em] text-[#d7c4ff]/70">Встроенный апгрейд</div>
-              <div className="mt-1 font-display text-[22px] font-black text-white">Апгрейд текущего дропа</div>
-              <div className="mt-1 text-[9px] font-semibold text-white/32">
-                Выбери цель и шанс. Доплата спишется с баланса автоматически.
-              </div>
-            </div>
-            <button type="button" onClick={closeUpgrade} className="rounded-lg border border-white/[0.09] px-3 py-2 text-[8px] font-black uppercase tracking-[0.08em] text-white/45 transition hover:border-white/20 hover:text-white">
-              Назад
-            </button>
-          </div>
-
-          <div className="relative mt-4 grid gap-4 lg:grid-cols-[1.05fr_.95fr]">
-            <div>
-              <div className="flex items-center gap-2 rounded-xl border border-white/[0.07] bg-black/20 p-2">
-                <SkinVisual skin={session.currentDrop} className="h-16 w-20 shrink-0 rounded-lg" showRarity={false} />
-                <div className="min-w-0">
-                  <div className="text-[7px] font-black uppercase tracking-[0.12em] text-white/25">Текущий дроп</div>
-                  <div className="truncate text-[10px] font-extrabold text-white/75">{session.currentDrop.name}</div>
-                  <div className="text-[10px] font-extrabold tabular-nums text-acid">{formatPrice(baseValue)}</div>
-                </div>
-              </div>
-
-              <div className="mt-3 flex items-center justify-between gap-2">
-                <div className="text-[8px] font-black uppercase tracking-[0.14em] text-white/35">Цель апгрейда</div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={pickTargetForChance}
-                    className="rounded-md border border-acid/20 bg-acid/[0.06] px-2 py-1 text-[7px] font-black uppercase tracking-[0.06em] text-acid transition hover:bg-acid/[0.12]"
-                  >
-                    Подобрать под шанс
-                  </button>
-                  <span className="text-[8px] font-semibold text-white/25">{upgradeTargets.length} показано</span>
-                </div>
-              </div>
-              <div className="relative mt-2">
-                <Icon name="search" size={12} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-white/25" />
-                <input
-                  value={upgradeQuery}
-                  onChange={(event) => setUpgradeQuery(event.target.value)}
-                  placeholder="Поиск цели..."
-                  className="h-9 w-full rounded-lg border border-white/[0.08] bg-black/25 pl-8 pr-8 text-[10px] font-semibold text-white placeholder:text-white/20 focus:border-acid/40 focus:outline-none"
-                />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[8px] font-bold tabular-nums text-white/25">
-                  {user.balance.toFixed(0)} G
-                </span>
-              </div>
-              <div className="mt-2 max-h-[290px] space-y-1.5 overflow-y-auto pr-1">
-                {upgradeTargets.map((skin) => {
-                  const meta = RARITY[skin.rarity] || RARITY.Common
-                  const active = skin.id === upgradeTargetId
-                  return (
-                    <button
-                      key={skin.id}
-                      type="button"
-                      onClick={() => setUpgradeTargetId(skin.id)}
-                      className={cx(
-                        'flex w-full items-center gap-2 rounded-lg border p-1.5 text-left transition',
-                        active ? 'border-acid/40 bg-acid/[0.08]' : 'border-white/[0.06] bg-white/[0.02] hover:border-white/15',
-                      )}
-                    >
-                      <SkinVisual skin={skin} className="h-10 w-12 shrink-0 rounded-md" showRarity={false} />
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-[8px] font-bold text-white/70">{skin.name}</div>
-                        <div className="text-[7px] font-black uppercase tracking-[0.06em]" style={{ color: meta.color }}>{meta.label}</div>
-                      </div>
-                      <span className="text-[8px] font-extrabold tabular-nums text-white/40">{formatPrice(skin.price)}</span>
-                    </button>
-                  )
-                })}
-                {!upgradeTargets.length && (
-                  <div className="rounded-lg border border-dashed border-white/[0.08] p-3 text-center text-[8px] text-white/25">
-                    Ничего не найдено
-                  </div>
-                )}
-              </div>
-              {upgradeTargets.length >= upgradeLimit && (
-                <button
-                  type="button"
-                  onClick={() => setUpgradeLimit((value) => value + 18)}
-                  className="mt-2 w-full rounded-lg border border-white/[0.08] py-1.5 text-[7px] font-black uppercase tracking-[0.08em] text-white/35 transition hover:border-acid/25 hover:text-acid"
-                >
-                  Показать ещё
-                </button>
-              )}
-            </div>
-
-            <div>
-              <div className="flex flex-col items-center">
-                <ReactorWheel chance={upgradeActualChance} roll={null} size={210} duration={wheelDuration}>
-                  <span className="relative text-[7px] font-black uppercase tracking-[0.18em] text-white/28">шанс</span>
-                  <span className="relative mt-1 font-display text-[30px] font-black text-white">{Math.round(upgradeActualChance)}%</span>
-                  {upgradeTarget && (
-                    <span className="relative mt-1 text-[7px] font-bold text-white/25">
-                      мин. {Math.max(5, Math.round(naturalChance))}%
-                    </span>
-                  )}
-                </ReactorWheel>
-              </div>
-
-              {upgradeTarget ? (
-                <div className="mt-3 rounded-xl border border-white/[0.07] bg-black/20 p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[7px] font-black uppercase tracking-[0.12em] text-white/25">Цель</span>
-                    <span className="truncate text-[10px] font-extrabold text-white/75">{upgradeTarget.name}</span>
-                    <span className="text-[9px] font-extrabold tabular-nums text-acid">{formatPrice(upgradeTarget.price)}</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="5"
-                    max="80"
-                    step="1"
-                    value={upgradeChance}
-                    onChange={(event) => setUpgradeChance(Number(event.target.value))}
-                    className="mt-3 w-full"
-                    style={{ accentColor: '#35ff87' }}
-                  />
-                  <div className="flex items-center justify-between gap-2 text-[7px] font-bold text-white/30">
-                    <span>5%</span>
-                    <span>фактический {Math.round(upgradeActualChance)}%</span>
-                    <span>80%</span>
-                  </div>
-                  <div className="mt-2 flex items-center justify-between gap-2 rounded-lg bg-white/[0.03] px-2 py-1.5 text-[8px] font-semibold text-white/35">
-                    <span>Доплата с баланса</span>
-                    <span className={cx('tabular-nums', upgradeBoost > user.balance ? 'text-[#ff9aac]' : 'text-acid')}>
-                      {formatPrice(Math.max(0, upgradeBoost))}
-                    </span>
-                  </div>
-                  <div className="mt-1 text-[7px] font-semibold text-white/22">
-                    Максимум для этой цели: {Math.round(Math.max(0, maxChance))}%
-                  </div>
-                  {maxChance < Math.max(5, naturalChance) && (
-                    <div className="mt-2 text-[8px] font-semibold text-[#ff9aac]">
-                      Недостаточно G для такого шанса — выбери цель дешевле.
-                    </div>
-                  )}
-                  {upgradeError && (
-                    <div className="mt-2 text-[8px] font-semibold text-[#ff9aac]">{upgradeError}</div>
-                  )}
-                  <button
-                    type="button"
-                    onClick={runUpgrade}
-                    disabled={upgradeBusy || maxChance < naturalChance || maxChance < 5}
-                    className="btn-acid mt-3 w-full !py-3 !text-[10px] uppercase tracking-[0.08em] disabled:opacity-40"
-                  >
-                    {upgradeBusy ? (
-                      <>
-                        <span className="spin-ring h-4 w-4 rounded-full border-2 border-[#041007]/30 border-t-[#041007]" />
-                        Апгрейдим...
-                      </>
-                    ) : (
-                      <>
-                        <Icon name="refresh" size={14} />
-                        Апгрейд за {formatPrice(baseValue + Math.max(0, upgradeBoost))}
-                      </>
-                    )}
-                  </button>
-                </div>
-              ) : (
-                <div className="mt-3 rounded-xl border border-dashed border-white/[0.08] p-4 text-center text-[9px] text-white/25">
-                  Выбери цель из списка
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      ) : session ? (
-        <div className="relative overflow-hidden rounded-[24px] border border-white/[0.09] bg-[#0b120d] p-4 sm:p-6">
-          <div className="pointer-events-none absolute -right-28 -top-28 h-72 w-72 rounded-full bg-acid/[0.07] blur-[90px]" />
-          <div className="relative flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <div className="text-[8px] font-black uppercase tracking-[0.18em] text-acid/65">Сессия реактора</div>
-              <div className="mt-1 font-display text-[22px] font-black text-white">Попытка {6 - session.attemptsLeft}/6</div>
-              <div className="mt-1 text-[9px] font-semibold text-white/30">
-                Вложено: {formatPrice(session.spent)} · при перекруте старый дроп сгорает
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className={cx('rounded-xl border px-3 py-2 text-right', net >= 0 ? 'border-acid/25 bg-acid/[0.06]' : 'border-[#ff5d7a]/25 bg-[#ff5d7a]/[0.06]')}>
-                <div className="text-[7px] font-black uppercase tracking-[0.12em] text-white/25">{net >= 0 ? 'Окуп' : 'Минус'}</div>
-                <div className="mt-0.5 text-[13px] font-extrabold tabular-nums" style={{ color: net >= 0 ? '#35ff87' : '#ff9aac' }}>
-                  {net >= 0 ? '+' : '-'}
-                  {formatPrice(Math.abs(net))} ({netPercent >= 0 ? '+' : ''}{netPercent.toFixed(1)}%)
-                </div>
-              </div>
-              <div key={session.attemptsLeft} className="reactor-attempt-pulse rounded-xl border border-white/[0.09] bg-black/25 px-3 py-2 text-right">
-                <div className="text-[7px] font-black uppercase tracking-[0.12em] text-white/25">Попытки</div>
-                <div className="mt-0.5 font-display text-[18px] font-black tabular-nums text-white">
-                  {session.attemptsLeft}/{session.attemptsTotal || 5}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="relative mt-4 grid gap-4 lg:grid-cols-[.9fr_1.1fr]">
-            <div className="flex flex-col">
-              <div className="rounded-xl border border-white/[0.07] bg-black/20 p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[8px] font-black uppercase tracking-[0.14em] text-white/35">Шанс следующего прокрута</span>
-                  <span className="text-[15px] font-black tabular-nums text-acid">{Math.round(chance)}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="5"
-                  max="80"
-                  step="1"
-                  value={chance}
-                  onChange={(event) => setChance(Number(event.target.value))}
-                  disabled={actionsLocked}
-                  className="mt-2 w-full"
-                  style={{ accentColor: '#35ff87' }}
-                />
-                <div className="flex items-center justify-between text-[7px] font-bold text-white/25">
-                  <span>5% · риск</span>
-                  <span>80% · стабильно</span>
-                </div>
-                <div className="mt-2 flex gap-1.5">
-                  {[10, 25, 50, 70].map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => setChance(preset)}
-                      disabled={actionsLocked}
-                      className="flex-1 rounded-md border border-white/[0.08] py-1 text-[7px] font-black text-white/35 transition hover:border-acid/30 hover:text-acid disabled:opacity-30"
-                    >
-                      {preset}%
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={reroll}
-                disabled={actionsLocked || session.attemptsLeft <= 0}
-                className="btn-acid mt-3 w-full !py-3.5 !text-[11px] uppercase tracking-[0.08em] disabled:opacity-40"
-              >
-                {busy === 'reroll' ? (
-                  <>
-                    <span className="spin-ring h-4 w-4 rounded-full border-2 border-[#041007]/30 border-t-[#041007]" />
-                    Крутим...
-                  </>
-                ) : session.attemptsLeft > 0 ? (
-                  <>
-                    <Icon name="refresh" size={15} />
-                    Перекрутить · {session.attemptsLeft}/{session.attemptsTotal || 5}
-                  </>
-                ) : (
-                  'Попытки закончились'
-                )}
-              </button>
-
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={takeDrop}
-                  disabled={actionsLocked}
-                  className="rounded-xl border border-acid/25 bg-acid/[0.07] px-2 py-2.5 text-[8px] font-black uppercase tracking-[0.08em] text-acid transition hover:bg-acid/[0.14] disabled:opacity-40"
-                >
-                  Забрать дроп
-                </button>
-                <button
-                  type="button"
-                  onClick={sellDrop}
-                  disabled={actionsLocked}
-                  className="rounded-xl border border-[#ffcf4d]/25 bg-[#ffcf4d]/[0.06] px-2 py-2.5 text-[8px] font-black uppercase tracking-[0.08em] text-[#ffe6a3] transition hover:bg-[#ffcf4d]/[0.12] disabled:opacity-40"
-                >
-                  Продать за {formatPrice(session.currentDrop.price)}
-                </button>
-              </div>
-              <button
-                type="button"
-                onClick={openUpgrade}
-                disabled={actionsLocked}
-                className="mt-2 w-full rounded-xl border border-[#b58bff]/25 bg-[#b58bff]/[0.07] px-3 py-2.5 text-[8px] font-black uppercase tracking-[0.1em] text-[#d7c4ff] transition hover:bg-[#b58bff]/[0.14] disabled:opacity-40"
-              >
-                В апгрейд
-              </button>
-              <div className="mt-2 text-center text-[7px] font-semibold leading-relaxed text-white/20">
-                {session.attemptsLeft > 0
-                  ? 'Можно менять шанс перед каждым перекрутом'
-                  : 'Хватит крутить — забери, продай или апгрейдни последний дроп'}
-              </div>
-            </div>
-
-            <div className="flex flex-col items-center">
-              <ReactorWheel chance={chance} roll={session.roll} size={230} duration={wheelDuration} spinKey={session.rollId}>
-                <span className="relative text-[7px] font-black uppercase tracking-[0.18em] text-white/28">шанс</span>
-                <span className="relative mt-1 font-display text-[32px] font-black leading-none text-white">{Math.round(chance)}%</span>
-                <span className="relative mt-1.5 rounded-full border border-white/[0.08] bg-black/30 px-2 py-0.5 text-[7px] font-black uppercase tracking-[0.08em] text-white/35">
-                  {session.attemptsLeft}/{session.attemptsTotal || 5}
-                </span>
-              </ReactorWheel>
-
-              <div className="mt-3 w-full">
-                {revealed ? (
-                  <div
-                    className="relative overflow-hidden rounded-2xl border bg-[#0d150f] transition"
-                    style={{
-                      borderColor: `${(RARITY[session.currentDrop.rarity] || RARITY.Common).color}66`,
-                      boxShadow: `0 0 42px ${(RARITY[session.currentDrop.rarity] || RARITY.Common).color}33`,
-                    }}
-                  >
-                    <SkinVisual skin={session.currentDrop} className="h-[150px] w-full" showRarity={false} />
-                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#050906] via-[#050906]/90 to-transparent p-3 pt-8">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="text-[7px] font-black uppercase tracking-[0.12em]" style={{ color: (RARITY[session.currentDrop.rarity] || RARITY.Common).color }}>
-                            {(RARITY[session.currentDrop.rarity] || RARITY.Common).label}
-                          </div>
-                          <div className="truncate text-[11px] font-extrabold text-white">{session.currentDrop.name}</div>
-                        </div>
-                        <div className="shrink-0 text-[12px] font-extrabold tabular-nums text-acid">{formatPrice(session.currentDrop.price)}</div>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex h-[150px] flex-col items-center justify-center rounded-2xl border border-dashed border-white/[0.08] bg-black/20">
-                    <span className="spin-ring h-7 w-7 rounded-full border-2 border-acid/15 border-t-acid" />
-                    <span className="mt-2 text-[8px] font-black uppercase tracking-[0.12em] text-white/30">Крутим реактор</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="relative overflow-hidden rounded-[24px] border border-white/[0.09] bg-[#0b120d] p-4 sm:p-6">
-          <div className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-acid/[0.06] blur-[80px]" />
-          <div className="relative grid gap-4 lg:grid-cols-[1.15fr_.85fr]">
-            <div>
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <div className="text-[8px] font-black uppercase tracking-[0.18em] text-acid/65">Шаг 1 · вложи глифы</div>
-                  <div className="mt-1 font-display text-[20px] font-black text-white">Собери стартовый набор</div>
-                </div>
-                <span className="rounded-lg border border-white/[0.08] bg-black/25 px-2.5 py-1.5 text-[9px] font-extrabold tabular-nums text-white/55">
-                  {selectedIds.length}/7 · {formatPrice(selectedValue)}
-                </span>
-              </div>
-
-              {inventory.length ? (
-                <div className="mt-3 grid max-h-[340px] grid-cols-3 gap-1.5 overflow-y-auto pr-1 sm:grid-cols-4">
-                  {inventory.map((item) => {
-                    const active = selectedIds.includes(item.instanceId)
-                    const meta = RARITY[item.rarity] || RARITY.Common
-                    return (
-                      <button
-                        key={item.instanceId}
-                        type="button"
-                        onClick={() => toggleGlyph(item)}
-                        disabled={Boolean(busy)}
-                        className={cx(
-                          'relative overflow-hidden rounded-lg border text-left transition disabled:opacity-40',
-                          active ? 'border-acid/50 bg-acid/[0.07]' : 'border-white/[0.06] bg-white/[0.02] hover:border-white/15',
-                        )}
-                      >
-                        <SkinVisual skin={item} className="h-14 w-full" showRarity={false} />
-                        <div className="p-1.5">
-                          <div className="truncate text-[7px] font-bold text-white/65">{item.name}</div>
-                          <div className="mt-0.5 flex items-center justify-between gap-1">
-                            <span className="truncate text-[6px] font-black uppercase" style={{ color: meta.color }}>{meta.label}</span>
-                            <span className="shrink-0 text-[7px] font-extrabold tabular-nums text-white/35">{formatPrice(item.price)}</span>
-                          </div>
-                        </div>
-                        {active && (
-                          <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-acid text-[8px] font-black text-[#041007]">✓</span>
-                        )}
-                      </button>
-                    )
-                  })}
-                </div>
-              ) : (
-                <div className="mt-3 rounded-xl border border-dashed border-white/10 bg-white/[0.02] p-4 text-[10px] text-white/30">
-                  Инвентарь пуст. Открой кейс или глиф, чтобы вложить скин в реактор.
-                </div>
-              )}
-
-              <div className="mt-3 rounded-xl border border-white/[0.07] bg-black/20 p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[8px] font-black uppercase tracking-[0.14em] text-white/35">Шанс успеха</span>
-                  <span className="text-[16px] font-black tabular-nums text-acid">{Math.round(chance)}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="5"
-                  max="80"
-                  step="1"
-                  value={chance}
-                  onChange={(event) => setChance(Number(event.target.value))}
-                  className="mt-2 w-full"
-                  style={{ accentColor: '#35ff87' }}
-                />
-                <div className="flex items-center justify-between text-[7px] font-bold text-white/25">
-                  <span>5% · высокий риск</span>
-                  <span>80% · низкий риск</span>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={startReactor}
-                disabled={Boolean(busy) || !selectedIds.length}
-                className="btn-acid mt-3 w-full !py-3.5 !text-[11px] uppercase tracking-[0.08em] disabled:opacity-40"
-              >
-                {busy === 'start' ? (
-                  <>
-                    <span className="spin-ring h-4 w-4 rounded-full border-2 border-[#041007]/30 border-t-[#041007]" />
-                    Запускаем...
-                  </>
-                ) : (
-                  <>
-                    <Icon name="bolt" size={15} />
-                    Запустить реактор
-                  </>
-                )}
-              </button>
-            </div>
-
-            <div className="flex flex-col items-center justify-center">
-              <ReactorWheel chance={chance} roll={null} size={230} duration={wheelDuration}>
-                <span className="relative text-[7px] font-black uppercase tracking-[0.18em] text-white/28">шанс</span>
-                <span className="relative mt-1 font-display text-[32px] font-black leading-none text-white">{Math.round(chance)}%</span>
-                <span className="relative mt-1.5 text-[7px] font-bold uppercase tracking-[0.08em] text-white/25">
-                  {selectedValue ? `потенциал ~${formatPrice((selectedValue / (chance / 100)) * 0.9)}` : 'выбери глифы'}
-                </span>
-              </ReactorWheel>
-              <div className="mt-3 max-w-[280px] text-center text-[8px] leading-relaxed text-white/25">
-                Ниже шанс — дороже потенциальный дроп. После запуска будет 5 перекрутов, а старый дроп будет сгорать.
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {launching && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#030604]/88 backdrop-blur-md">
-          <div className="relative flex h-[320px] w-[320px] items-center justify-center">
-            <div className="absolute h-24 w-24 rounded-full border border-acid/40 bg-acid/[0.08] shadow-[0_0_60px_rgba(53,255,135,.35)]" />
-            <Icon name="bolt" size={34} className="relative z-10 text-acid" />
-            {launchSkins.map((skin, index) => {
-              const angle = (index / Math.max(1, launchSkins.length)) * Math.PI * 2 - Math.PI / 2
-              const radius = 122
-              return (
-                <div
-                  key={skin.instanceId}
-                  className="reactor-pull absolute left-1/2 top-1/2 h-24 w-[76px] overflow-hidden rounded-xl border border-white/15 bg-[#0d150f] shadow-panel"
-                  style={{
-                    marginLeft: -38,
-                    marginTop: -48,
-                    '--rx': `${Math.cos(angle) * radius}px`,
-                    '--ry': `${Math.sin(angle) * radius}px`,
-                    animationDelay: `${index * 35}ms`,
-                  }}
-                >
-                  <SkinVisual skin={skin} className="h-full w-full" showRarity={false} />
-                </div>
-              )
-            })}
-          </div>
-          <div className="absolute bottom-[18%] text-center">
-            <div className="font-display text-[18px] font-black tracking-[-0.03em] text-white">Запуск реактора</div>
-            <div className="mt-1 text-[8px] font-black uppercase tracking-[0.18em] text-acid/60">вложенные глифы плавятся</div>
-          </div>
-        </div>
-      )}
-    </section>
   )
 }
 
@@ -9938,17 +9397,6 @@ export default function App() {
             <GlyphSection
               glyphs={glyphs}
               user={user}
-              token={token}
-              fast={fast}
-              onUpdate={applyUpdate}
-              onToast={pushToast}
-            />
-          )}
-
-          {activeSection === 'reactor' && (
-            <ReactorSection
-              user={user}
-              catalog={catalog}
               token={token}
               fast={fast}
               onUpdate={applyUpdate}
