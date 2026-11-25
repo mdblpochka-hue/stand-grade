@@ -347,6 +347,13 @@ const ICONS = {
       <path d="M2 13h5l2 3h6l2-3h5" />
     </>
   ),
+  cards: (
+    <>
+      <rect x="7" y="3" width="12" height="17" rx="2" />
+      <path d="M4 6v13a2 2 0 0 0 2 2h9" />
+      <path d="m13 7 1.1 2.7L17 11l-2.9 1.1L13 15l-1.1-2.9L9 11l2.9-1.3L13 7Z" />
+    </>
+  ),
   snowflake: (
     <>
       <path d="M12 2v20M4.2 6.5l15.6 11M19.8 6.5 4.2 17.5" />
@@ -1042,6 +1049,7 @@ function LiveBar({ feed = [], online = 0, username = '' }) {
 const NAV_ITEMS = [
   { id: 'upgrade', label: 'Апгрейд', icon: 'refresh' },
   { id: 'cases', label: 'Кейсы', icon: 'box' },
+  { id: 'glyphs', label: 'Глифы', icon: 'cards' },
   { id: 'craft', label: 'Крафт', icon: 'sparkles' },
   { id: 'battle', label: 'Битва', icon: 'flame' },
   { id: 'promos', label: 'Промокоды', icon: 'ticket' },
@@ -1049,7 +1057,7 @@ const NAV_ITEMS = [
   { id: 'inventory', label: 'Инвентарь', icon: 'archive' },
 ]
 
-const SECTION_IDS = ['cases', 'craft', 'battle', 'upgrade', 'promos', 'requests', 'inventory', 'settings']
+const SECTION_IDS = ['cases', 'glyphs', 'craft', 'battle', 'upgrade', 'promos', 'requests', 'inventory', 'settings']
 
 function readSectionFromHash() {
   if (typeof window === 'undefined') return 'cases'
@@ -1289,6 +1297,17 @@ function Header({
                   type="button"
                   onClick={() => {
                     setMenuOpen(false)
+                    onNavigate('glyphs')
+                  }}
+                  className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] font-bold text-white/60 transition hover:bg-white/[0.05] hover:text-white"
+                >
+                  <Icon name="cards" size={14} />
+                  Глифы
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
                     onNavigate('requests')
                   }}
                   className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] font-bold text-white/60 transition hover:bg-white/[0.05] hover:text-white"
@@ -1353,9 +1372,10 @@ function MobileDock({
 }) {
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-white/[0.07] bg-[#080d09]/95 backdrop-blur-xl lg:hidden">
-      <div className="safe-bottom grid grid-cols-7 px-1 pb-1 pt-1.5">
+      <div className="safe-bottom grid grid-cols-8 px-1 pb-1 pt-1.5">
         {[
           { id: 'cases', label: 'Кейсы', icon: 'box' },
+          { id: 'glyphs', label: 'Глифы', icon: 'cards' },
           { id: 'craft', label: 'Крафт', icon: 'sparkles' },
           { id: 'battle', label: 'Битва', icon: 'flame' },
           { id: 'upgrade', label: 'Апгрейд', icon: 'refresh' },
@@ -1895,6 +1915,340 @@ function CasesSection({ cases, onOpen, user, now }) {
           />
         ))}
       </div>
+    </section>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  Glyph decks (card packs)                                          */
+/* ------------------------------------------------------------------ */
+
+function GlyphCardBack({ deck, className = '' }) {
+  const accent = deck?.accent || '#8dff6a'
+  return (
+    <div
+      className={cx('relative overflow-hidden rounded-2xl border', className)}
+      style={{
+        borderColor: `${accent}45`,
+        background: `radial-gradient(ellipse at 50% 35%, ${accent}24 0%, transparent 60%), linear-gradient(160deg,#111a13,#070b08)`,
+      }}
+    >
+      <div className="absolute inset-0 bg-grid-faint opacity-35" />
+      <div className="absolute inset-2 rounded-xl border border-white/[0.08]" />
+      <div className="absolute inset-3 rounded-lg border border-dashed" style={{ borderColor: `${accent}22` }} />
+      <div className="relative flex h-full flex-col items-center justify-center text-center">
+        <span
+          className="flex h-14 w-14 items-center justify-center rounded-2xl border"
+          style={{ borderColor: `${accent}40`, backgroundColor: `${accent}12`, color: accent }}
+        >
+          <Icon name="cards" size={28} />
+        </span>
+        <div
+          className="mt-3 font-display text-[18px] font-black uppercase tracking-[0.14em]"
+          style={{ color: accent }}
+        >
+          {deck?.kicker || 'GLYPH'}
+        </div>
+        <div className="mt-1 text-[7px] font-black uppercase tracking-[0.24em] text-white/25">
+          Stand Grade · Glyph Card
+        </div>
+        <div className="mt-4 flex items-center gap-1.5">
+          {[0, 1, 2, 3, 4].map((dot) => (
+            <span
+              key={dot}
+              className="h-1 w-1 rounded-full"
+              style={{ backgroundColor: dot < 3 ? accent : 'rgba(255,255,255,.15)' }}
+            />
+          ))}
+        </div>
+      </div>
+      <span className="absolute left-3 top-3 font-mono text-[7px] font-black tracking-[0.18em] text-white/25">
+        SG
+      </span>
+      <span className="absolute bottom-3 right-3 font-mono text-[7px] font-black tracking-[0.18em] text-white/20">
+        18+
+      </span>
+    </div>
+  )
+}
+
+function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
+  const [activeDeck, setActiveDeck] = useState(null)
+  const [revealed, setRevealed] = useState(null)
+  const [flipped, setFlipped] = useState(false)
+  const [opening, setOpening] = useState(false)
+  const [error, setError] = useState('')
+  const activeDeckRef = useRef(null)
+
+  const flipDuration = fast ? 320 : 650
+
+  function openDeck(deck) {
+    setActiveDeck(deck)
+    activeDeckRef.current = deck
+    setRevealed(null)
+    setFlipped(false)
+    setError('')
+  }
+
+  function closeDeck() {
+    setActiveDeck(null)
+    activeDeckRef.current = null
+    setRevealed(null)
+    setFlipped(false)
+    setOpening(false)
+    setError('')
+  }
+
+  useEscape(closeDeck, Boolean(activeDeck))
+
+  async function openGlyph() {
+    const deck = activeDeck
+    if (!deck || opening) return
+    if (user.balance + 1e-9 < deck.price) {
+      setError('Недостаточно голды для этой печати')
+      return
+    }
+
+    unlockAudio()
+    setOpening(true)
+    setError('')
+    setRevealed(null)
+    setFlipped(false)
+
+    try {
+      const data = await apiRequest('/api/open-glyph', {
+        method: 'POST',
+        token,
+        body: { deckId: deck.id },
+      })
+      onUpdate(data)
+      if (activeDeckRef.current?.id !== deck.id) return
+      setRevealed(data.winner)
+      setOpening(false)
+      requestAnimationFrame(() => setFlipped(true))
+      playCaseResult(data.winner.rarity)
+      onToast(data.message, 'success', 'Глиф раскрыт')
+    } catch (requestError) {
+      setOpening(false)
+      setError(requestError.message)
+      onToast(requestError.message, 'error')
+      if (requestError.data?.user) onUpdate(requestError.data)
+    }
+  }
+
+  return (
+    <section id="glyphs" className="pt-10 sm:pt-14">
+      <SectionHeading
+        eyebrow="Glyph cards"
+        title="Глифы"
+        description="Печати вероятности: выбери колоду, раскрой карту и забери скин в инвентарь. Чем дороже печать — тем выше шанс на редкий глиф."
+        action={
+          <span className="chip !border-[#b58bff]/20 !text-[#d7c4ff]/75">
+            <Icon name="cards" size={11} />
+            {glyphs.length} печатей
+          </span>
+        }
+      />
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {glyphs.map((deck, index) => {
+          const top = deck.featuredSkin || deck.topPrize || deck.contents?.[0]
+          const meta = top ? RARITY[top.rarity] || RARITY.Common : RARITY.Common
+          return (
+            <article
+              key={deck.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => openDeck(deck)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  openDeck(deck)
+                }
+              }}
+              className="group relative cursor-pointer overflow-hidden rounded-[22px] border border-white/[0.075] bg-panel transition duration-300 hover:-translate-y-1 hover:border-white/[0.15] hover:shadow-[0_24px_70px_rgba(0,0,0,.38)] fade-up"
+              style={{ animationDelay: `${index * 45}ms` }}
+            >
+              <div className="relative h-[196px] overflow-hidden border-b border-white/[0.06] p-4">
+                <div className="absolute left-4 top-4 z-10 rounded-md border border-white/[0.09] bg-black/30 px-2 py-1 text-[7px] font-black uppercase tracking-[0.14em] text-white/45">
+                  {deck.kicker}
+                </div>
+                <div className="absolute right-4 top-4 z-10 text-right">
+                  <div className="text-[7px] font-bold uppercase tracking-[0.14em] text-white/25">Печать</div>
+                  <div className="mt-0.5 text-[13px] font-extrabold tabular-nums text-white">
+                    {formatPrice(deck.price)}
+                  </div>
+                </div>
+                <GlyphCardBack
+                  deck={deck}
+                  className="absolute inset-x-10 bottom-3 top-12 transition duration-300 group-hover:scale-[1.03]"
+                />
+              </div>
+
+              <div className="p-4">
+                <h3 className="font-display text-[16px] font-extrabold leading-tight tracking-[-0.03em] text-white">
+                  {deck.name}
+                </h3>
+                <p className="mt-1.5 text-[10px] font-medium text-white/30">{deck.subtitle}</p>
+
+                <div className="mt-3.5 flex h-1.5 gap-[2px] overflow-hidden rounded-full bg-white/[0.04]">
+                  {(deck.rarityBreakdown || []).map((row) => (
+                    <div
+                      key={row.rarity}
+                      title={`${row.rarity}: ${formatChance(row.chance)}`}
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${row.chance}%`,
+                        minWidth: row.chance > 0 ? '2px' : 0,
+                        backgroundColor: (RARITY[row.rarity] || RARITY.Common).color,
+                      }}
+                    />
+                  ))}
+                </div>
+
+                <div className="mt-3 flex items-center gap-2 rounded-lg border border-white/[0.07] bg-black/20 px-2.5 py-2">
+                  <span className="text-[7px] font-black uppercase tracking-[0.14em] text-white/25">Топ</span>
+                  <span className="min-w-0 flex-1 truncate text-[9px] font-extrabold" style={{ color: meta.color }}>
+                    {top?.name || '—'}
+                  </span>
+                  <span className="text-[8px] font-extrabold tabular-nums text-white/38">
+                    {top ? formatPrice(top.price) : '—'}
+                  </span>
+                </div>
+              </div>
+            </article>
+          )
+        })}
+      </div>
+
+      {activeDeck && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#030604]/88 p-3 backdrop-blur-md"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Глиф · ${activeDeck.name}`}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeDeck()
+          }}
+        >
+          <div className="pop-in relative max-h-[92vh] w-full max-w-[420px] overflow-y-auto rounded-[26px] border border-white/[0.1] bg-[#0b120d] shadow-panel">
+            <div className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full blur-[70px]" style={{ backgroundColor: `${activeDeck.accent}22` }} />
+            <div className="relative flex items-center justify-between gap-2 border-b border-white/[0.07] px-4 py-3">
+              <div className="min-w-0">
+                <div className="text-[7px] font-black uppercase tracking-[0.18em]" style={{ color: activeDeck.accent }}>
+                  {activeDeck.kicker}
+                </div>
+                <div className="mt-0.5 truncate font-display text-[16px] font-black text-white">
+                  {activeDeck.name}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="rounded-lg border border-white/[0.08] bg-black/25 px-2.5 py-1.5 text-[10px] font-extrabold tabular-nums text-white/70">
+                  {formatPrice(activeDeck.price)}
+                </span>
+                <button
+                  type="button"
+                  onClick={closeDeck}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.09] text-white/45 transition hover:border-white/20 hover:text-white"
+                  aria-label="Закрыть"
+                >
+                  <Icon name="x" size={14} />
+                </button>
+              </div>
+            </div>
+
+            <div className="relative p-4">
+              <div className="relative h-[330px] [perspective:1100px]">
+                <div
+                  className="relative h-full w-full transition-transform"
+                  style={{
+                    transformStyle: 'preserve-3d',
+                    transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
+                    transitionDuration: `${flipDuration}ms`,
+                    transitionTimingFunction: 'cubic-bezier(.2,.8,.2,1)',
+                  }}
+                >
+                  <div className="absolute inset-0 [backface-visibility:hidden]">
+                    <GlyphCardBack deck={activeDeck} className="h-full w-full" />
+                  </div>
+                  <div className="absolute inset-0 [backface-visibility:hidden]" style={{ transform: 'rotateY(180deg)' }}>
+                    {revealed ? (
+                      <div
+                        className="relative h-full w-full overflow-hidden rounded-2xl border bg-[#0d150f]"
+                        style={{ borderColor: `${(RARITY[revealed.rarity] || RARITY.Common).color}55` }}
+                      >
+                        <SkinVisual skin={revealed} className="h-[230px] w-full" showRarity={false} />
+                        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#050906] via-[#050906]/90 to-transparent p-4 pt-10">
+                          <div
+                            className="text-[8px] font-black uppercase tracking-[0.16em]"
+                            style={{ color: (RARITY[revealed.rarity] || RARITY.Common).color }}
+                          >
+                            {(RARITY[revealed.rarity] || RARITY.Common).label}
+                          </div>
+                          <div className="mt-1 text-[13px] font-extrabold leading-tight text-white">
+                            {revealed.name}
+                          </div>
+                          <div className="mt-1 text-[11px] font-extrabold tabular-nums text-acid">
+                            {formatPrice(revealed.price)}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center rounded-2xl border border-white/[0.08] bg-black/30">
+                        <span className="spin-ring h-8 w-8 rounded-full border-2 border-acid/15 border-t-acid" />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {error && (
+                <div className="mt-3 rounded-xl border border-[#ff7189]/20 bg-[#ff7189]/[0.06] px-3 py-2 text-[9px] font-semibold text-[#ff9aac]">
+                  {error}
+                </div>
+              )}
+
+              <div className="mt-3 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={openGlyph}
+                  disabled={opening || user.balance + 1e-9 < activeDeck.price}
+                  className="btn-acid flex-1 !py-3 !text-[10px] uppercase tracking-[0.08em] disabled:opacity-40"
+                >
+                  {opening ? (
+                    <>
+                      <span className="spin-ring h-4 w-4 rounded-full border-2 border-[#041007]/30 border-t-[#041007]" />
+                      Тянем карту...
+                    </>
+                  ) : revealed ? (
+                    <>
+                      <Icon name="cards" size={14} />
+                      Ещё за {formatPrice(activeDeck.price)}
+                    </>
+                  ) : (
+                    <>
+                      <Icon name="cards" size={14} />
+                      Открыть за {formatPrice(activeDeck.price)}
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={closeDeck}
+                  className="rounded-xl border border-white/[0.09] px-4 py-3 text-[9px] font-black uppercase tracking-[0.08em] text-white/50 transition hover:border-white/20 hover:text-white"
+                >
+                  Закрыть
+                </button>
+              </div>
+              <div className="mt-2 text-center text-[7.5px] font-semibold text-white/22">
+                {revealed
+                  ? 'Глиф уже добавлен в инвентарь'
+                  : 'Результат определяет сервер · шанс виден в разбивке печати'}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   )
 }
@@ -5254,8 +5608,8 @@ function LoginScreen({ onLogin, onRegister, notice }) {
 
           <div className="mt-8 grid max-w-[380px] grid-cols-2 gap-2">
             {[
-              ['15', 'кейсов', 'box'],
-              ['1400+', 'предметов', 'coin'],
+              ['20', 'кейсов', 'box'],
+              ['1 498', 'предметов', 'coin'],
             ].map(([value, label, icon]) => (
               <div key={label} className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-3.5">
                 <div className="flex items-center justify-between">
@@ -8486,6 +8840,7 @@ export default function App() {
       user: data.user,
       daily: data.daily,
       cases: data.cases,
+      glyphs: data.glyphs,
       catalog: data.catalog,
       feed: data.feed || [],
       online: data.online || 1,
@@ -8632,6 +8987,7 @@ export default function App() {
   const user = status.user
   const daily = status.daily
   const cases = status.cases || []
+  const glyphs = status.glyphs || []
   const catalog = status.catalog || []
   const requestBadge =
     user.role === 'owner' ? Number(status.applications?.pendingCount) || 0 : 0
@@ -8687,6 +9043,17 @@ export default function App() {
               <CasesSection cases={cases} onOpen={openCase} user={user} now={now} />
               <StorePromo catalog={catalog} onStore={goStore} />
             </>
+          )}
+
+          {activeSection === 'glyphs' && (
+            <GlyphSection
+              glyphs={glyphs}
+              user={user}
+              token={token}
+              fast={fast}
+              onUpdate={applyUpdate}
+              onToast={pushToast}
+            />
           )}
 
           {activeSection === 'craft' && (

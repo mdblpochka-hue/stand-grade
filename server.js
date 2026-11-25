@@ -115,6 +115,7 @@ const SECURITY_IP_BLOCK_MS =
 const SECURITY_VIOLATION_WINDOW_MS = 5 * 60 * 1000
 const SECURITY_SENSITIVE_PATHS = new Set([
   '/api/open-case',
+  '/api/open-glyph',
   '/api/upgrade',
   '/api/craft',
   '/api/case-battle',
@@ -725,7 +726,54 @@ const CASE_DEFS = [
       Nameless: 300,
     },
   },
+  {
+    id: 'frost',
+    name: 'Ледяная Печать',
+    subtitle: 'Холодный средний тир',
+    kicker: 'FROST SEAL',
+    price: 199,
+    accent: '#9fe8ff',
+    featuredSkinId: 'm9-bayonet-blue-blood',
+  },
+  {
+    id: 'aurora',
+    name: 'Северное Сияние',
+    subtitle: 'Аврора и неон',
+    kicker: 'AURORA',
+    price: 399,
+    accent: '#7affd4',
+    featuredSkinId: 'm9-bayonet-dragon-glass',
+  },
+  {
+    id: 'inferno',
+    name: 'Пекло',
+    subtitle: 'Огненный апгрейд',
+    kicker: 'INFERNO',
+    price: 749,
+    accent: '#ff8a5c',
+    featuredSkinId: 'karambit-dragon-glass',
+  },
+  {
+    id: 'void',
+    name: 'Пустота',
+    subtitle: 'Тёмная материя',
+    kicker: 'VOID',
+    price: 1999,
+    accent: '#b58bff',
+    featuredSkinId: 'butterfly-dragon-glass',
+  },
+  {
+    id: 'solar',
+    name: 'Солнечный Удар',
+    subtitle: 'Золотой максимум',
+    kicker: 'SOLAR STRIKE',
+    price: 3999,
+    accent: '#ffcf4d',
+    featuredSkinId: 'karambit-gold',
+  },
 ]
+
+CASE_DEFS.sort((a, b) => a.price - b.price)
 
 const CASES = CASE_DEFS.map((definition) => {
   const { weights, ...rest } = definition
@@ -823,6 +871,112 @@ function buildCasePayload(config) {
 }
 
 const CASE_PAYLOADS = CASES.map(buildCasePayload)
+
+/* ------------------------------------------------------------------ */
+/*  Glyph decks (card packs)                                          */
+/* ------------------------------------------------------------------ */
+
+const GLYPH_DECKS = [
+  {
+    id: 'spark',
+    name: 'Искра',
+    subtitle: 'Печать первого шанса',
+    kicker: 'SPARK SEAL',
+    price: 29,
+    accent: '#8dff6a',
+    featuredSkinId: 'g22-frost-wyrm',
+  },
+  {
+    id: 'ash',
+    name: 'Пепел',
+    subtitle: 'Тлеющий тир',
+    kicker: 'ASH SEAL',
+    price: 79,
+    accent: '#b8b8b8',
+    featuredSkinId: 'deagle-dragon-glass',
+  },
+  {
+    id: 'azure',
+    name: 'Лазурь',
+    subtitle: 'Синий диапазон',
+    kicker: 'AZURE SEAL',
+    price: 199,
+    accent: '#58cfff',
+    featuredSkinId: 'm9-bayonet-blue-blood',
+  },
+  {
+    id: 'mirage',
+    name: 'Мираж',
+    subtitle: 'Иллюзия редкого дропа',
+    kicker: 'MIRAGE SEAL',
+    price: 499,
+    accent: '#c08bff',
+    featuredSkinId: 'karambit-dragon-glass',
+  },
+  {
+    id: 'eclipse',
+    name: 'Затмение',
+    subtitle: 'Тёмная сторона удачи',
+    kicker: 'ECLIPSE SEAL',
+    price: 999,
+    accent: '#ffcf4d',
+    featuredSkinId: 'butterfly-dragon-glass',
+  },
+  {
+    id: 'aurora',
+    name: 'Аврора',
+    subtitle: 'Печать северного света',
+    kicker: 'AURORA SEAL',
+    price: 2499,
+    accent: '#5effc9',
+    featuredSkinId: 'gloves-champion',
+  },
+  {
+    id: 'singularity',
+    name: 'Сингулярность',
+    subtitle: 'Предел вероятности',
+    kicker: 'SINGULARITY',
+    price: 4999,
+    accent: '#ff7ad9',
+    featuredSkinId: 'karambit-gold',
+  },
+  {
+    id: 'abyss',
+    name: 'Бездна',
+    subtitle: 'Последняя печать',
+    kicker: 'ABYSS SEAL',
+    price: 9999,
+    accent: '#f3fff6',
+    featuredSkinId: 'sting-mimicry',
+  },
+]
+
+const GLYPHS = GLYPH_DECKS.map((deck) => {
+  const pool = makeRatioPool(deck.price)
+  const payload = buildCasePayload({ ...deck, pool })
+  const maxFeaturedPrice = deck.price * 25
+  const candidates = pool
+    .map(([skinId]) => SKIN_BY_ID.get(skinId))
+    .filter(
+      (skin) =>
+        skin &&
+        skin.price >= deck.price * 1.5 &&
+        skin.price <= maxFeaturedPrice,
+    )
+    .sort((a, b) => b.price - a.price)
+  const featuredSkin =
+    candidates[0] ||
+    payload.contents.find((skin) => skin.price <= maxFeaturedPrice) ||
+    payload.contents[0] ||
+    null
+  return {
+    ...deck,
+    pool,
+    payload: { ...payload, featuredSkin, contents: payload.contents.slice(0, 18) },
+  }
+})
+const GLYPH_BY_ID = new Map(GLYPHS.map((deck) => [deck.id, deck]))
+const GLYPH_PAYLOADS = GLYPHS.map((deck) => deck.payload)
 
 function weightedPickFrom(pool) {
   const total = pool.reduce((sum, [, weight]) => sum + weight, 0)
@@ -2066,6 +2220,7 @@ app.use('/api/register', registerRateLimiter)
 app.use(
   [
     '/api/open-case',
+    '/api/open-glyph',
     '/api/upgrade',
     '/api/craft',
     '/api/case-battle',
@@ -2101,6 +2256,7 @@ function sessionPayload(user) {
     user: publicUser(user),
     daily: buildDaily(),
     cases: CASE_PAYLOADS,
+    glyphs: GLYPH_PAYLOADS,
     catalog: [...SKINS].sort((a, b) => a.price - b.price),
     feed: liveFeed,
     online: Math.max(1, onlineCount()),
@@ -2283,6 +2439,7 @@ app.get('/api/status', auth, (req, res) => {
     user: publicUser(req.user),
     daily: buildDaily(),
     cases: CASE_PAYLOADS,
+    glyphs: GLYPH_PAYLOADS,
     catalog: [...SKINS].sort((a, b) => a.price - b.price),
     feed: liveFeed,
     online: Math.max(1, onlineCount()),
@@ -2372,6 +2529,37 @@ app.post('/api/open-case', auth, (req, res) => {
       count > 1
         ? `Открыто ${count} кейсов на ${totalValue} G`
         : `Выпал ${openings[0].winner.name}`,
+  })
+})
+
+app.post('/api/open-glyph', auth, (req, res) => {
+  const deck = GLYPH_BY_ID.get(String(req.body?.deckId || ''))
+  if (!deck) return sendError(res, 404, 'GLYPH_NOT_FOUND', 'Печать не найдена')
+
+  const user = req.user
+  if (user.balance + 1e-9 < deck.price) {
+    return sendError(res, 400, 'INSUFFICIENT_FUNDS', 'Недостаточно голды для открытия глифа', {
+      user: publicUser(user),
+      daily: buildDaily(),
+    })
+  }
+
+  const winner = weightedPickFrom(deck.pool)
+  const entry = makeInventoryEntry(winner)
+  user.inventory.unshift(entry)
+  user.balance = roundGold(user.balance - deck.price)
+  pushCaseHistory(user, { id: deck.id, name: `Глиф · ${deck.name}` }, winner, entry.instanceId)
+  pushLiveDrop(user, winner, 'case')
+  saveState()
+
+  res.json({
+    ok: true,
+    deck: deck.payload,
+    winner: { ...winner, instanceId: entry.instanceId, obtainedAt: entry.obtainedAt },
+    user: publicUser(user),
+    daily: buildDaily(),
+    feedEntry: liveFeed[0],
+    message: `Глиф раскрыт: ${winner.name}`,
   })
 })
 
