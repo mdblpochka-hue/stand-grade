@@ -1978,7 +1978,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   const [modalOpen, setModalOpen] = useState(false)
   const [deckPreview, setDeckPreview] = useState(false)
   const [openCount, setOpenCount] = useState(1)
-  const [selectedDropId, setSelectedDropId] = useState(null)
+  const [selectedDropIds, setSelectedDropIds] = useState([])
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [upgradeMultiplier, setUpgradeMultiplier] = useState(null)
@@ -1993,18 +1993,21 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   const activeDeck =
     glyphs.find((deck) => deck.id === (session?.deckId || activeDeckId)) || null
   const drops = session?.drops || []
-  const selectedDrop =
-    drops.find((drop) => drop.id === selectedDropId) || drops[0] || null
+  const selectedDrops = drops.filter((drop) => selectedDropIds.includes(drop.id))
+  const selectedValue = selectedDrops.reduce(
+    (sum, drop) => sum + drop.currentDrop.price,
+    0,
+  )
+  const selectedCost = selectedDrops.length * (Number(session?.cardPrice) || 0)
+  const selectedNet = selectedValue - selectedCost
+  const selectedNetPercent = selectedCost > 0 ? (selectedNet / selectedCost) * 100 : 0
 
   useEffect(() => {
-    if (!drops.length) {
-      setSelectedDropId(null)
-      return
-    }
-    if (!selectedDropId || !drops.some((drop) => drop.id === selectedDropId)) {
-      setSelectedDropId(drops[0].id)
-    }
-  }, [session?.id, drops.map((drop) => drop.id).join('|'), selectedDropId])
+    setSelectedDropIds((previous) => {
+      const next = previous.filter((id) => drops.some((drop) => drop.id === id))
+      return next.length === previous.length ? previous : next
+    })
+  }, [session?.id, drops.map((drop) => drop.id).join('|')])
 
   useEffect(() => {
     if (!upgradeResult) {
@@ -2046,7 +2049,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
     setUpgradeRevealed(false)
     setUpgradeError('')
     if (user.glyphDrop) {
-      setSelectedDropId(user.glyphDrop.drops?.[0]?.id || null)
+      setSelectedDropIds([])
     } else {
       setModalOpen(false)
     }
@@ -2077,7 +2080,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       setActiveDeckId(deck.id)
       setModalOpen(true)
       setDeckPreview(false)
-      setSelectedDropId(data.glyphDrop?.drops?.[0]?.id || null)
+      setSelectedDropIds([])
       setUpgradeResult(null)
       setUpgradeMultiplier(null)
       setUpgradeError('')
@@ -2096,9 +2099,6 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       setActiveDeckId(session.deckId)
       setModalOpen(true)
       setDeckPreview(false)
-      if (!drops.some((drop) => drop.id === selectedDropId)) {
-        setSelectedDropId(drops[0]?.id || null)
-      }
       return
     }
     setActiveDeckId(deck.id)
@@ -2117,16 +2117,13 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
     setActiveDeckId(session.deckId)
     setModalOpen(true)
     setDeckPreview(false)
-    if (!drops.some((drop) => drop.id === selectedDropId)) {
-      setSelectedDropId(drops[0]?.id || null)
-    }
     setUpgradeResult(null)
     setUpgradeMultiplier(null)
     setUpgradeError('')
   }
 
   async function rerollDrop() {
-    if (!session || !selectedDrop || selectedDrop.attemptsLeft <= 0 || actionRef.current || busy) return
+    if (!session || session.attemptsLeft <= 0 || actionRef.current || busy) return
     actionRef.current = true
     setBusy('reroll')
     setError('')
@@ -2135,9 +2132,9 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       const data = await apiRequest('/api/glyph/reroll', {
         method: 'POST',
         token,
-        body: { dropId: selectedDrop.id },
       })
       onUpdate(data)
+      setSelectedDropIds([])
       setUpgradeResult(null)
       setUpgradeMultiplier(null)
       setUpgradeError('')
@@ -2152,7 +2149,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   }
 
   async function collectDrop() {
-    if (!session || !selectedDrop || actionRef.current || busy) return
+    if (!session || !selectedDropIds.length || actionRef.current || busy) return
     actionRef.current = true
     setBusy('collect')
     setError('')
@@ -2160,13 +2157,13 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       const data = await apiRequest('/api/glyph/collect', {
         method: 'POST',
         token,
-        body: { dropId: selectedDrop.id },
+        body: { dropIds: selectedDropIds },
       })
       onUpdate(data)
       playCoin()
       onToast(data.message, 'success', 'Дроп забран')
+      setSelectedDropIds([])
       if (data.glyphDrop) {
-        setSelectedDropId(data.glyphDrop.drops?.[0]?.id || null)
         setUpgradeResult(null)
         setUpgradeMultiplier(null)
         setUpgradeError('')
@@ -2184,7 +2181,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   }
 
   async function sellDrop() {
-    if (!session || !selectedDrop || actionRef.current || busy) return
+    if (!session || !selectedDropIds.length || actionRef.current || busy) return
     actionRef.current = true
     setBusy('sell')
     setError('')
@@ -2192,13 +2189,13 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       const data = await apiRequest('/api/glyph/sell', {
         method: 'POST',
         token,
-        body: { dropId: selectedDrop.id },
+        body: { dropIds: selectedDropIds },
       })
       onUpdate(data)
       playCoin()
       onToast(data.message, 'success', 'Дроп продан')
+      setSelectedDropIds([])
       if (data.glyphDrop) {
-        setSelectedDropId(data.glyphDrop.drops?.[0]?.id || null)
         setUpgradeResult(null)
         setUpgradeMultiplier(null)
         setUpgradeError('')
@@ -2216,13 +2213,13 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   }
 
   function prepareUpgrade(multiplier) {
-    if (!session || !selectedDrop || upgradeBusy) return
+    if (!session || !selectedDropIds.length || upgradeBusy) return
     setUpgradeMultiplier(multiplier)
     setUpgradeError('')
   }
 
   async function runUpgrade(multiplier) {
-    if (!session || !selectedDrop || upgradeBusy || actionRef.current) return
+    if (!session || !selectedDropIds.length || upgradeBusy || actionRef.current) return
     actionRef.current = true
     setUpgradeBusy(true)
     setUpgradeMultiplier(multiplier)
@@ -2234,7 +2231,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       const data = await apiRequest('/api/glyph/upgrade', {
         method: 'POST',
         token,
-        body: { multiplier, dropId: selectedDrop.id },
+        body: { multiplier, dropIds: selectedDropIds },
       })
       onUpdate(data)
       setUpgradeResult(data)
@@ -2248,17 +2245,32 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
     }
   }
 
-  const drop = selectedDrop?.currentDrop || null
-  const dropMeta = drop ? RARITY[drop.rarity] || RARITY.Common : RARITY.Common
-  const net = Number(selectedDrop?.net) || 0
-  const netPercent = Number(selectedDrop?.netPercent) || 0
+  function toggleDrop(dropId) {
+    setSelectedDropIds((previous) =>
+      previous.includes(dropId)
+        ? previous.filter((id) => id !== dropId)
+        : [...previous, dropId],
+    )
+    setUpgradeMultiplier(null)
+    setUpgradeError('')
+  }
+
+  function toggleSelectAll() {
+    setSelectedDropIds((previous) =>
+      previous.length === drops.length ? [] : drops.map((drop) => drop.id),
+    )
+    setUpgradeMultiplier(null)
+    setUpgradeError('')
+  }
+
+  const allSelected = drops.length > 0 && selectedDropIds.length === drops.length
 
   return (
     <section id="glyphs" className="pt-10 sm:pt-14">
       <SectionHeading
         eyebrow="Glyph cards"
         title="Глифы"
-        description="Открой печать, меняй дроп до пяти раз, а затем забери, продай или отправь скин в апгрейд x2 / x3 / x5 / x10."
+        description="Открой печать, перекручивай всю пачку до пяти раз, выбирай нужные скины и забирай, продавай или отправляй в апгрейд x2 / x3 / x5 / x10."
         action={
           <span className="chip !border-[#b58bff]/20 !text-[#d7c4ff]/75">
             <Icon name="cards" size={11} />
@@ -2281,7 +2293,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
               Активный дроп · {session.deckName}
             </div>
             <div className="mt-1 text-[11px] font-bold text-white/75">
-              Карт: {session.remaining} из {session.count} · у каждой 5 перекрутов
+              Карт: {session.remaining} из {session.count} · перекрутов пачки {session.attemptsLeft}/{session.attemptsTotal || 5}
             </div>
           </div>
           <button
@@ -2341,7 +2353,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                     {deck.name}
                   </h3>
                   <span className="rounded-md border border-white/[0.08] bg-white/[0.03] px-1.5 py-0.5 text-[7px] font-black uppercase tracking-[0.06em] text-white/35">
-                    5 перекрутов
+                    5 перекрутов пачки
                   </span>
                 </div>
                 <p className="mt-1.5 text-[10px] font-medium text-white/30">{deck.subtitle}</p>
@@ -2437,7 +2449,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                         <div className="flex items-center justify-between gap-2">
                           <div>
                             <div className="text-[8px] font-black uppercase tracking-[0.14em] text-white/30">
-                              5 перекрутов на карту
+                              5 перекрутов на всю пачку
                             </div>
                             <div className="mt-0.5 text-[8px] font-semibold text-white/28">
                               Сначала дроп, потом собери, продай или отправь в апгрейд
@@ -2523,8 +2535,8 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                         )}
                       </button>
                       <div className="mt-2 text-center text-[7px] font-semibold leading-relaxed text-white/22">
-                        {openCount > 1 ? `${openCount} карты в очереди · ` : ''}
-                        5 перекрутов на каждую карту
+                        {openCount > 1 ? `${openCount} карты в пачке · ` : ''}
+                        перекрут заменяет всю пачку сразу
                       </div>
                     </div>
                   )
@@ -2619,22 +2631,36 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                     </div>
                   )}
                 </div>
-              ) : session && selectedDrop && drop ? (
+              ) : session && drops.length ? (
                 <div>
-                  <div className="flex gap-2 overflow-x-auto pb-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="text-[7px] font-black uppercase tracking-[0.14em] text-white/30">
+                        Открыто карт · {drops.length}
+                      </div>
+                      <div className="mt-0.5 text-[8px] font-semibold text-white/28">
+                        Нажми на карту, чтобы выбрать. Можно выбрать несколько.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={toggleSelectAll}
+                      className="shrink-0 rounded-lg border border-white/[0.09] px-2 py-1.5 text-[7px] font-black uppercase tracking-[0.06em] text-white/45 transition hover:border-white/25 hover:text-white"
+                    >
+                      {allSelected ? 'Снять выбор' : 'Выбрать все'}
+                    </button>
+                  </div>
+
+                  <div className="mt-2 flex gap-2 overflow-x-auto pb-2">
                     {drops.map((dropItem) => {
                       const skin = dropItem.currentDrop
                       const meta = RARITY[skin.rarity] || RARITY.Common
-                      const active = dropItem.id === selectedDrop.id
+                      const active = selectedDropIds.includes(dropItem.id)
                       return (
                         <button
                           key={dropItem.id}
                           type="button"
-                          onClick={() => {
-                            setSelectedDropId(dropItem.id)
-                            setUpgradeMultiplier(null)
-                            setUpgradeError('')
-                          }}
+                          onClick={() => toggleDrop(dropItem.id)}
                           className={cx(
                             'relative w-[94px] shrink-0 overflow-hidden rounded-xl border bg-[#0d150f] text-left transition',
                             active
@@ -2649,16 +2675,17 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                               <span className="truncate text-[6px] font-black uppercase" style={{ color: meta.color }}>{meta.label}</span>
                               <span className="shrink-0 text-[7px] font-extrabold tabular-nums text-acid">{formatPrice(skin.price)}</span>
                             </div>
-                            <div className="mt-1 flex items-center justify-between text-[6.5px] font-semibold text-white/25">
-                              <span>перекруты</span>
-                              <span className={dropItem.attemptsLeft <= 0 ? 'text-[#ff9aac]' : 'text-acid'}>
-                                {dropItem.attemptsLeft}/{dropItem.attemptsTotal || 5}
-                              </span>
-                            </div>
                           </div>
-                          {active && (
-                            <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-acid text-[8px] font-black text-[#041007]">✓</span>
-                          )}
+                          <span
+                            className={cx(
+                              'absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full border text-[8px] font-black',
+                              active
+                                ? 'border-acid bg-acid text-[#041007]'
+                                : 'border-white/25 bg-black/50 text-transparent',
+                            )}
+                          >
+                            ✓
+                          </span>
                         </button>
                       )
                     })}
@@ -2667,21 +2694,29 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                   <div className="mt-3 rounded-xl border border-white/[0.07] bg-black/20 p-3">
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0">
-                        <div className="text-[7px] font-black uppercase tracking-[0.12em] text-white/25">Выбранный дроп</div>
-                        <div className="mt-0.5 truncate text-[11px] font-extrabold" style={{ color: dropMeta.color }}>{drop.name}</div>
-                        <div className="text-[10px] font-extrabold tabular-nums text-acid">{formatPrice(drop.price)}</div>
+                        <div className="text-[7px] font-black uppercase tracking-[0.12em] text-white/25">Выбрано</div>
+                        <div className="mt-0.5 text-[11px] font-extrabold text-white">
+                          Выбрано: {selectedDrops.length} · всего {drops.length}
+                        </div>
+                        <div className="text-[10px] font-extrabold tabular-nums text-acid">
+                          {formatPrice(selectedValue)}
+                        </div>
                       </div>
                       <div className="shrink-0 text-right">
-                        <div className="text-[7px] font-black uppercase tracking-[0.1em] text-white/25">Перекруты</div>
-                        <div key={`${selectedDrop.id}-${selectedDrop.attemptsLeft}`} className="glyph-attempt-pulse mt-0.5 font-display text-[18px] font-black tabular-nums text-white">
-                          {selectedDrop.attemptsLeft}/{selectedDrop.attemptsTotal || 5}
+                        <div className="text-[7px] font-black uppercase tracking-[0.1em] text-white/25">Перекруты пачки</div>
+                        <div key={`attempts-${session.attemptsLeft}`} className="glyph-attempt-pulse mt-0.5 font-display text-[18px] font-black tabular-nums text-white">
+                          {session.attemptsLeft}/{session.attemptsTotal || 5}
                         </div>
                       </div>
                     </div>
-                    <div className={cx('mt-2 flex items-center justify-between rounded-lg border px-2 py-1.5', net >= 0 ? 'border-acid/20 bg-acid/[0.05]' : 'border-[#ff5d7a]/20 bg-[#ff5d7a]/[0.05]')}>
-                      <span className="text-[7px] font-black uppercase tracking-[0.08em] text-white/30">{net >= 0 ? 'Окуп' : 'Минус'}</span>
-                      <span className={cx('text-[9px] font-extrabold tabular-nums', net >= 0 ? 'text-acid' : 'text-[#ff9aac]')}>
-                        {net >= 0 ? '+' : '-'}{formatPrice(Math.abs(net))} ({netPercent >= 0 ? '+' : ''}{netPercent.toFixed(1)}%)
+                    <div className={cx('mt-2 flex items-center justify-between rounded-lg border px-2 py-1.5', selectedNet >= 0 ? 'border-acid/20 bg-acid/[0.05]' : 'border-[#ff5d7a]/20 bg-[#ff5d7a]/[0.05]')}>
+                      <span className="text-[7px] font-black uppercase tracking-[0.08em] text-white/30">
+                        {selectedNet >= 0 ? 'Окуп' : 'Минус'} выбранного
+                      </span>
+                      <span className={cx('text-[9px] font-extrabold tabular-nums', selectedNet >= 0 ? 'text-acid' : 'text-[#ff9aac]')}>
+                        {selectedDrops.length
+                          ? `${selectedNet >= 0 ? '+' : '-'}${formatPrice(Math.abs(selectedNet))} (${selectedNetPercent >= 0 ? '+' : ''}${selectedNetPercent.toFixed(1)}%)`
+                          : '—'}
                       </span>
                     </div>
                   </div>
@@ -2689,47 +2724,54 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                   <button
                     type="button"
                     onClick={rerollDrop}
-                    disabled={Boolean(busy) || selectedDrop.attemptsLeft <= 0}
+                    disabled={Boolean(busy) || session.attemptsLeft <= 0}
                     className="btn-acid mt-3 w-full !py-3 !text-[10px] uppercase tracking-[0.08em] disabled:opacity-40"
                   >
                     {busy === 'reroll' ? (
                       <>
                         <span className="spin-ring h-4 w-4 rounded-full border-2 border-[#041007]/30 border-t-[#041007]" />
-                        Меняем дроп...
+                        Перекручиваем пачку...
                       </>
-                    ) : selectedDrop.attemptsLeft > 0 ? (
+                    ) : session.attemptsLeft > 0 ? (
                       <>
                         <Icon name="refresh" size={14} />
-                        Перекрутить · {selectedDrop.attemptsLeft}/{selectedDrop.attemptsTotal || 5}
+                        Перекрутить всё · {session.attemptsLeft}/{session.attemptsTotal || 5}
                       </>
                     ) : (
                       'Перекруты закончились'
                     )}
                   </button>
+                  <div className="mt-1.5 text-center text-[7px] font-semibold text-white/22">
+                    Перекрут заменит всю пачку сразу
+                  </div>
 
                   <div className="mt-2 grid grid-cols-2 gap-2">
                     <button
                       type="button"
                       onClick={collectDrop}
-                      disabled={Boolean(busy)}
+                      disabled={Boolean(busy) || !selectedDrops.length}
                       className="rounded-xl border border-acid/25 bg-acid/[0.07] px-2 py-2.5 text-[8px] font-black uppercase tracking-[0.08em] text-acid transition hover:bg-acid/[0.14] disabled:opacity-40"
                     >
-                      Собрать
+                      Собрать {selectedDrops.length ? `(${selectedDrops.length})` : ''}
                     </button>
                     <button
                       type="button"
                       onClick={sellDrop}
-                      disabled={Boolean(busy)}
+                      disabled={Boolean(busy) || !selectedDrops.length}
                       className="rounded-xl border border-[#ffcf4d]/25 bg-[#ffcf4d]/[0.06] px-2 py-2.5 text-[8px] font-black uppercase tracking-[0.08em] text-[#ffe6a3] transition hover:bg-[#ffcf4d]/[0.12] disabled:opacity-40"
                     >
-                      Продать за {formatPrice(drop.price)}
+                      Продать {selectedDrops.length ? `за ${formatPrice(selectedValue)}` : ''}
                     </button>
                   </div>
 
                   <div className="mt-3">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-[7px] font-black uppercase tracking-[0.14em] text-white/30">Кинуть в апгрейд</span>
-                      <span className="text-[7px] font-semibold text-white/22">выбранный скин уйдёт в апгрейд</span>
+                      <span className="text-[7px] font-semibold text-white/22">
+                        {selectedDrops.length
+                          ? `${selectedDrops.length} выбранных · база ${formatPrice(selectedValue)}`
+                          : 'сначала выбери карты'}
+                      </span>
                     </div>
                     {upgradeMultiplier ? (
                       <div className="mt-1.5 rounded-xl border border-[#b58bff]/30 bg-[#b58bff]/[0.08] p-3">
@@ -2739,10 +2781,10 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                               Подтверждение
                             </div>
                             <div className="mt-0.5 text-[12px] font-black text-[#d7c4ff]">
-                              Апгрейд x{upgradeMultiplier}
+                              Апгрейд x{upgradeMultiplier} · выбрано: {selectedDrops.length}
                             </div>
                             <div className="mt-1 text-[8px] font-semibold text-white/35">
-                              Шанс {Math.round((90 / upgradeMultiplier) * 10) / 10}% · цель подберётся автоматически
+                              Шанс {Math.round((90 / upgradeMultiplier) * 10) / 10}% · цель на {formatPrice(selectedValue * upgradeMultiplier)}
                             </div>
                           </div>
                           <button
@@ -2757,7 +2799,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                         <button
                           type="button"
                           onClick={() => runUpgrade(upgradeMultiplier)}
-                          disabled={upgradeBusy}
+                          disabled={upgradeBusy || !selectedDrops.length}
                           className="btn-acid mt-2 w-full !py-2.5 !text-[9px] uppercase tracking-[0.08em] disabled:opacity-40"
                         >
                           {upgradeBusy ? (
@@ -2770,7 +2812,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                           )}
                         </button>
                         <div className="mt-1.5 text-center text-[7px] font-semibold text-white/22">
-                          Выбранный дроп сгорит при провале
+                          Выбранные дропы сгорят при провале
                         </div>
                       </div>
                     ) : (
@@ -2782,7 +2824,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                               key={multiplier}
                               type="button"
                               onClick={() => prepareUpgrade(multiplier)}
-                              disabled={upgradeBusy}
+                              disabled={upgradeBusy || !selectedDrops.length}
                               className="rounded-lg border border-[#b58bff]/25 bg-[#b58bff]/[0.07] px-1 py-2 text-center transition hover:bg-[#b58bff]/[0.14] disabled:opacity-40"
                             >
                               <div className="text-[11px] font-black text-[#d7c4ff]">x{multiplier}</div>
@@ -2796,14 +2838,14 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                       <div className="mt-2 text-[8px] font-semibold text-[#ff9aac]">{upgradeError}</div>
                     )}
                     <div className="mt-2 text-center text-[7px] font-semibold leading-relaxed text-white/22">
-                      Апгрейд забирает только выбранный дроп. При провале скин сгорает, 5–10% вернётся на баланс.
+                      В апгрейд уходят только выбранные карты. При провале они сгорают, 5–10% вернётся на баланс.
                     </div>
                   </div>
 
                   <div className="mt-2 text-center text-[7px] font-semibold text-white/20">
-                    {selectedDrop.attemptsLeft > 0
-                      ? 'Старый дроп сгорает при каждом перекруте'
-                      : 'На этой карте перекруты закончились'}
+                    {session.attemptsLeft > 0
+                      ? 'Каждый перекрут заменяет всю пачку'
+                      : 'Перекруты пачки закончились'}
                   </div>
                 </div>
               ) : (
