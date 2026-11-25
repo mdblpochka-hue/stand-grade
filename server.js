@@ -1863,13 +1863,32 @@ function makeValuePool(targetValue) {
 
 function publicGlyphDrop(user) {
   const session = user.glyphDrop
-  const active = session?.drops?.[0]
-  if (!active?.currentDrop) return null
-  const drop = SKIN_BY_ID.get(active.currentDrop.id) || active.currentDrop
-  const count = Math.max(1, Math.trunc(Number(session.count) || 1))
+  const drops = Array.isArray(session?.drops) ? session.drops : []
+  if (!drops.length) return null
+  const count = Math.max(1, Math.trunc(Number(session.count) || drops.length))
   const spent = roundGold(Math.max(0, Number(session.spent) || 0))
   const cardPrice = roundGold(spent / count)
-  const net = roundGold(drop.price - cardPrice)
+  const publicDrops = drops
+    .map((drop) => {
+      if (!drop?.currentDrop) return null
+      const skin = SKIN_BY_ID.get(drop.currentDrop.id) || drop.currentDrop
+      const net = roundGold(skin.price - cardPrice)
+      return {
+        id: drop.id,
+        currentDrop: { ...skin },
+        attemptsLeft: Math.max(
+          0,
+          Math.min(GLYPH_REROLLS, Math.trunc(Number(drop.attemptsLeft) || 0)),
+        ),
+        attemptsTotal: GLYPH_REROLLS,
+        rollId: drop.rollId || null,
+        net,
+        netPercent: cardPrice > 0 ? roundGold((net / cardPrice) * 100) : 0,
+      }
+    })
+    .filter(Boolean)
+  if (!publicDrops.length) return null
+
   return {
     id: session.id,
     deckId: session.deckId,
@@ -1877,16 +1896,8 @@ function publicGlyphDrop(user) {
     spent,
     cardPrice,
     count,
-    remaining: session.drops.length,
-    attemptsLeft: Math.max(
-      0,
-      Math.min(GLYPH_REROLLS, Math.trunc(Number(active.attemptsLeft) || 0)),
-    ),
-    attemptsTotal: GLYPH_REROLLS,
-    currentDrop: { ...drop },
-    net,
-    netPercent: cardPrice > 0 ? roundGold((net / cardPrice) * 100) : 0,
-    rollId: active.rollId || null,
+    remaining: publicDrops.length,
+    drops: publicDrops,
     createdAt: session.createdAt || null,
     multipliers: GLYPH_UPGRADE_MULTIPLIERS.map((multiplier) => ({
       multiplier,
@@ -2690,9 +2701,10 @@ app.post('/api/open-glyph', auth, (req, res) => {
 app.post('/api/glyph/reroll', auth, (req, res) => {
   const user = req.user
   const session = user.glyphDrop
-  const active = session?.drops?.[0]
-  if (!active?.currentDrop) return sendError(res, 409, 'NO_GLYPH_DROP', 'Сначала открой глиф')
-  const attemptsLeft = Math.max(0, Math.trunc(Number(active.attemptsLeft) || 0))
+  const dropId = String(req.body?.dropId || '')
+  const targetDrop = session?.drops?.find((drop) => drop.id === dropId) || session?.drops?.[0]
+  if (!targetDrop?.currentDrop) return sendError(res, 409, 'NO_GLYPH_DROP', 'Сначала открой глиф')
+  const attemptsLeft = Math.max(0, Math.trunc(Number(targetDrop.attemptsLeft) || 0))
   if (attemptsLeft <= 0) {
     return sendError(res, 400, 'NO_ATTEMPTS', 'Перекруты закончились — забери, продай или отправь дроп в апгрейд')
   }
@@ -2700,9 +2712,9 @@ app.post('/api/glyph/reroll', auth, (req, res) => {
   if (!deck) return sendError(res, 404, 'GLYPH_NOT_FOUND', 'Печать не найдена')
 
   const winner = weightedPickFrom(deck.pool)
-  active.attemptsLeft = attemptsLeft - 1
-  active.currentDrop = { ...winner }
-  active.rollId = crypto.randomUUID()
+  targetDrop.attemptsLeft = attemptsLeft - 1
+  targetDrop.currentDrop = { ...winner }
+  targetDrop.rollId = crypto.randomUUID()
   saveState()
 
   return res.json({
@@ -2719,9 +2731,10 @@ app.post('/api/glyph/reroll', auth, (req, res) => {
 app.post('/api/glyph/collect', auth, (req, res) => {
   const user = req.user
   const session = user.glyphDrop
-  const active = session?.drops?.[0]
-  if (!active?.currentDrop) return sendError(res, 409, 'NO_GLYPH_DROP', 'Сначала открой глиф')
-  const skin = SKIN_BY_ID.get(active.currentDrop.id) || active.currentDrop
+  const dropId = String(req.body?.dropId || '')
+  const targetDrop = session?.drops?.find((drop) => drop.id === dropId) || session?.drops?.[0]
+  if (!targetDrop?.currentDrop) return sendError(res, 409, 'NO_GLYPH_DROP', 'Сначала открой глиф')
+  const skin = SKIN_BY_ID.get(targetDrop.currentDrop.id) || targetDrop.currentDrop
   const count = Math.max(1, Math.trunc(Number(session.count) || 1))
   const cardPrice = roundGold(Number(session.spent) / count)
   const entry = makeInventoryEntry(skin)
@@ -2729,7 +2742,7 @@ app.post('/api/glyph/collect', auth, (req, res) => {
   pushCaseHistory(user, { id: 'glyph-drop', name: `Глиф · ${session.deckName}` }, skin, entry.instanceId)
   pushLiveDrop(user, skin, 'case')
   const net = roundGold(skin.price - cardPrice)
-  session.drops.shift()
+  session.drops = session.drops.filter((drop) => drop.id !== targetDrop.id)
   if (!session.drops.length) user.glyphDrop = null
   saveState()
 
@@ -2748,14 +2761,15 @@ app.post('/api/glyph/collect', auth, (req, res) => {
 app.post('/api/glyph/sell', auth, (req, res) => {
   const user = req.user
   const session = user.glyphDrop
-  const active = session?.drops?.[0]
-  if (!active?.currentDrop) return sendError(res, 409, 'NO_GLYPH_DROP', 'Сначала открой глиф')
-  const skin = SKIN_BY_ID.get(active.currentDrop.id) || active.currentDrop
+  const dropId = String(req.body?.dropId || '')
+  const targetDrop = session?.drops?.find((drop) => drop.id === dropId) || session?.drops?.[0]
+  if (!targetDrop?.currentDrop) return sendError(res, 409, 'NO_GLYPH_DROP', 'Сначала открой глиф')
+  const skin = SKIN_BY_ID.get(targetDrop.currentDrop.id) || targetDrop.currentDrop
   const count = Math.max(1, Math.trunc(Number(session.count) || 1))
   const cardPrice = roundGold(Number(session.spent) / count)
   const net = roundGold(skin.price - cardPrice)
   user.balance = roundGold(user.balance + skin.price)
-  session.drops.shift()
+  session.drops = session.drops.filter((drop) => drop.id !== targetDrop.id)
   if (!session.drops.length) user.glyphDrop = null
   saveState()
 
@@ -2773,15 +2787,16 @@ app.post('/api/glyph/sell', auth, (req, res) => {
 app.post('/api/glyph/upgrade', auth, (req, res) => {
   const user = req.user
   const session = user.glyphDrop
-  const active = session?.drops?.[0]
-  if (!active?.currentDrop) return sendError(res, 409, 'NO_GLYPH_DROP', 'Сначала открой глиф')
+  const dropId = String(req.body?.dropId || '')
+  const targetDrop = session?.drops?.find((drop) => drop.id === dropId) || session?.drops?.[0]
+  if (!targetDrop?.currentDrop) return sendError(res, 409, 'NO_GLYPH_DROP', 'Сначала открой глиф')
 
   const multiplier = Math.trunc(Number(req.body?.multiplier))
   if (!GLYPH_UPGRADE_MULTIPLIERS.includes(multiplier)) {
     return sendError(res, 400, 'BAD_MULTIPLIER', 'Доступны апгрейды x2, x3, x5 и x10')
   }
 
-  const baseSkin = SKIN_BY_ID.get(active.currentDrop.id) || active.currentDrop
+  const baseSkin = SKIN_BY_ID.get(targetDrop.currentDrop.id) || targetDrop.currentDrop
   const count = Math.max(1, Math.trunc(Number(session.count) || 1))
   const cardPrice = roundGold(Number(session.spent) / count)
   const targetValue = Math.max(1, baseSkin.price * multiplier)
@@ -2808,7 +2823,7 @@ app.post('/api/glyph/upgrade', auth, (req, res) => {
     user.balance = roundGold(user.balance + compensation)
   }
 
-  session.drops.shift()
+  session.drops = session.drops.filter((drop) => drop.id !== targetDrop.id)
   if (!session.drops.length) user.glyphDrop = null
   const net = won
     ? roundGold(targetSkin.price - cardPrice)

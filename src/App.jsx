@@ -1978,7 +1978,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   const [modalOpen, setModalOpen] = useState(false)
   const [deckPreview, setDeckPreview] = useState(false)
   const [openCount, setOpenCount] = useState(1)
-  const [revealed, setRevealed] = useState(false)
+  const [selectedDropId, setSelectedDropId] = useState(null)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [upgradeMultiplier, setUpgradeMultiplier] = useState(null)
@@ -1988,21 +1988,23 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   const [upgradeError, setUpgradeError] = useState('')
   const actionRef = useRef(false)
   const stopSoundRef = useRef(null)
-  const duration = fast ? 320 : 650
   const upgradeDuration = fast ? ANIM_MS_FAST : ANIM_MS_NORMAL
 
   const activeDeck =
     glyphs.find((deck) => deck.id === (session?.deckId || activeDeckId)) || null
+  const drops = session?.drops || []
+  const selectedDrop =
+    drops.find((drop) => drop.id === selectedDropId) || drops[0] || null
 
   useEffect(() => {
-    if (!session?.rollId) return undefined
-    setRevealed(false)
-    const timer = setTimeout(() => {
-      setRevealed(true)
-      if (session.currentDrop) playCaseResult(session.currentDrop.rarity)
-    }, duration + 100)
-    return () => clearTimeout(timer)
-  }, [session?.rollId, duration, session?.currentDrop?.rarity])
+    if (!drops.length) {
+      setSelectedDropId(null)
+      return
+    }
+    if (!selectedDropId || !drops.some((drop) => drop.id === selectedDropId)) {
+      setSelectedDropId(drops[0].id)
+    }
+  }, [session?.id, drops.map((drop) => drop.id).join('|'), selectedDropId])
 
   useEffect(() => {
     if (!upgradeResult) {
@@ -2044,7 +2046,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
     setUpgradeRevealed(false)
     setUpgradeError('')
     if (user.glyphDrop) {
-      setRevealed(false)
+      setSelectedDropId(user.glyphDrop.drops?.[0]?.id || null)
     } else {
       setModalOpen(false)
     }
@@ -2075,7 +2077,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       setActiveDeckId(deck.id)
       setModalOpen(true)
       setDeckPreview(false)
-      setRevealed(false)
+      setSelectedDropId(data.glyphDrop?.drops?.[0]?.id || null)
       setUpgradeResult(null)
       setUpgradeMultiplier(null)
       setUpgradeError('')
@@ -2094,14 +2096,15 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       setActiveDeckId(session.deckId)
       setModalOpen(true)
       setDeckPreview(false)
-      setRevealed(true)
+      if (!drops.some((drop) => drop.id === selectedDropId)) {
+        setSelectedDropId(drops[0]?.id || null)
+      }
       return
     }
     setActiveDeckId(deck.id)
     setOpenCount(1)
     setDeckPreview(true)
     setModalOpen(true)
-    setRevealed(false)
     setUpgradeResult(null)
     setUpgradeMultiplier(null)
     setUpgradeRevealed(false)
@@ -2114,20 +2117,26 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
     setActiveDeckId(session.deckId)
     setModalOpen(true)
     setDeckPreview(false)
-    setRevealed(true)
+    if (!drops.some((drop) => drop.id === selectedDropId)) {
+      setSelectedDropId(drops[0]?.id || null)
+    }
     setUpgradeResult(null)
     setUpgradeMultiplier(null)
     setUpgradeError('')
   }
 
   async function rerollDrop() {
-    if (!session || session.attemptsLeft <= 0 || actionRef.current || busy) return
+    if (!session || !selectedDrop || selectedDrop.attemptsLeft <= 0 || actionRef.current || busy) return
     actionRef.current = true
     setBusy('reroll')
     setError('')
     unlockAudio()
     try {
-      const data = await apiRequest('/api/glyph/reroll', { method: 'POST', token })
+      const data = await apiRequest('/api/glyph/reroll', {
+        method: 'POST',
+        token,
+        body: { dropId: selectedDrop.id },
+      })
       onUpdate(data)
       setUpgradeResult(null)
       setUpgradeMultiplier(null)
@@ -2143,17 +2152,21 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   }
 
   async function collectDrop() {
-    if (!session || actionRef.current || busy) return
+    if (!session || !selectedDrop || actionRef.current || busy) return
     actionRef.current = true
     setBusy('collect')
     setError('')
     try {
-      const data = await apiRequest('/api/glyph/collect', { method: 'POST', token })
+      const data = await apiRequest('/api/glyph/collect', {
+        method: 'POST',
+        token,
+        body: { dropId: selectedDrop.id },
+      })
       onUpdate(data)
       playCoin()
       onToast(data.message, 'success', 'Дроп забран')
       if (data.glyphDrop) {
-        setRevealed(false)
+        setSelectedDropId(data.glyphDrop.drops?.[0]?.id || null)
         setUpgradeResult(null)
         setUpgradeMultiplier(null)
         setUpgradeError('')
@@ -2171,17 +2184,21 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   }
 
   async function sellDrop() {
-    if (!session || actionRef.current || busy) return
+    if (!session || !selectedDrop || actionRef.current || busy) return
     actionRef.current = true
     setBusy('sell')
     setError('')
     try {
-      const data = await apiRequest('/api/glyph/sell', { method: 'POST', token })
+      const data = await apiRequest('/api/glyph/sell', {
+        method: 'POST',
+        token,
+        body: { dropId: selectedDrop.id },
+      })
       onUpdate(data)
       playCoin()
       onToast(data.message, 'success', 'Дроп продан')
       if (data.glyphDrop) {
-        setRevealed(false)
+        setSelectedDropId(data.glyphDrop.drops?.[0]?.id || null)
         setUpgradeResult(null)
         setUpgradeMultiplier(null)
         setUpgradeError('')
@@ -2199,13 +2216,13 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   }
 
   function prepareUpgrade(multiplier) {
-    if (!session || upgradeBusy || !revealed) return
+    if (!session || !selectedDrop || upgradeBusy) return
     setUpgradeMultiplier(multiplier)
     setUpgradeError('')
   }
 
   async function runUpgrade(multiplier) {
-    if (!session || upgradeBusy || actionRef.current) return
+    if (!session || !selectedDrop || upgradeBusy || actionRef.current) return
     actionRef.current = true
     setUpgradeBusy(true)
     setUpgradeMultiplier(multiplier)
@@ -2217,7 +2234,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       const data = await apiRequest('/api/glyph/upgrade', {
         method: 'POST',
         token,
-        body: { multiplier },
+        body: { multiplier, dropId: selectedDrop.id },
       })
       onUpdate(data)
       setUpgradeResult(data)
@@ -2231,10 +2248,10 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
     }
   }
 
-  const drop = session?.currentDrop || null
+  const drop = selectedDrop?.currentDrop || null
   const dropMeta = drop ? RARITY[drop.rarity] || RARITY.Common : RARITY.Common
-  const net = Number(session?.net) || 0
-  const netPercent = Number(session?.netPercent) || 0
+  const net = Number(selectedDrop?.net) || 0
+  const netPercent = Number(selectedDrop?.netPercent) || 0
 
   return (
     <section id="glyphs" className="pt-10 sm:pt-14">
@@ -2264,8 +2281,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
               Активный дроп · {session.deckName}
             </div>
             <div className="mt-1 text-[11px] font-bold text-white/75">
-              {session.currentDrop?.name} · карта {session.count - session.remaining + 1} из {session.count} ·
-              перекрутов {session.attemptsLeft}/{session.attemptsTotal || 5}
+              Карт: {session.remaining} из {session.count} · у каждой 5 перекрутов
             </div>
           </div>
           <button
@@ -2387,7 +2403,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
               <div className="flex items-center gap-2">
                 {session && (
                   <span className="hidden rounded-lg border border-acid/20 bg-acid/[0.06] px-2 py-1 text-[7px] font-black uppercase tracking-[0.06em] text-acid/80 sm:inline">
-                    Карта {session.count - session.remaining + 1}/{session.count}
+                    Карт {session.remaining}/{session.count}
                   </span>
                 )}
                 <span className="rounded-lg border border-white/[0.08] bg-black/25 px-2.5 py-1.5 text-[10px] font-extrabold tabular-nums text-white/70">
@@ -2603,64 +2619,77 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                     </div>
                   )}
                 </div>
-              ) : session && drop ? (
+              ) : session && selectedDrop && drop ? (
                 <div>
-                  <div className="relative h-[300px] [perspective:1100px]">
-                    <div
-                      className="relative h-full w-full"
-                      style={{
-                        transformStyle: 'preserve-3d',
-                        transform: revealed ? 'rotateY(180deg)' : 'rotateY(0deg)',
-                        transition: `transform ${duration}ms cubic-bezier(.2,.8,.2,1)`,
-                      }}
-                    >
-                      <div className="absolute inset-0 [backface-visibility:hidden]">
-                        <GlyphCardBack deck={activeDeck} className="h-full w-full" />
-                      </div>
-                      <div className="absolute inset-0 [backface-visibility:hidden]" style={{ transform: 'rotateY(180deg)' }}>
-                        <div
-                          className="relative h-full w-full overflow-hidden rounded-2xl border bg-[#0d150f]"
-                          style={{
-                            borderColor: `${dropMeta.color}66`,
-                            boxShadow: `0 0 44px ${dropMeta.color}33`,
+                  <div className="flex gap-2 overflow-x-auto pb-2">
+                    {drops.map((dropItem) => {
+                      const skin = dropItem.currentDrop
+                      const meta = RARITY[skin.rarity] || RARITY.Common
+                      const active = dropItem.id === selectedDrop.id
+                      return (
+                        <button
+                          key={dropItem.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedDropId(dropItem.id)
+                            setUpgradeMultiplier(null)
+                            setUpgradeError('')
                           }}
+                          className={cx(
+                            'relative w-[94px] shrink-0 overflow-hidden rounded-xl border bg-[#0d150f] text-left transition',
+                            active
+                              ? 'border-acid/60 shadow-[0_0_22px_rgba(53,255,135,.2)]'
+                              : 'border-white/[0.08] hover:border-white/20',
+                          )}
                         >
-                          <SkinVisual skin={drop} className="h-[215px] w-full" showRarity={false} />
-                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#050906] via-[#050906]/90 to-transparent p-4 pt-10">
-                            <div className="flex items-end justify-between gap-2">
-                              <div className="min-w-0">
-                                <div className="text-[8px] font-black uppercase tracking-[0.16em]" style={{ color: dropMeta.color }}>
-                                  {dropMeta.label}
-                                </div>
-                                <div className="mt-1 truncate text-[13px] font-extrabold text-white">{drop.name}</div>
-                              </div>
-                              <div className="shrink-0 text-[13px] font-extrabold tabular-nums text-acid">{formatPrice(drop.price)}</div>
+                          <SkinVisual skin={skin} className="h-[100px] w-full" showRarity={false} />
+                          <div className="p-1.5">
+                            <div className="truncate text-[7px] font-bold text-white/70">{skin.name}</div>
+                            <div className="mt-0.5 flex items-center justify-between gap-1">
+                              <span className="truncate text-[6px] font-black uppercase" style={{ color: meta.color }}>{meta.label}</span>
+                              <span className="shrink-0 text-[7px] font-extrabold tabular-nums text-acid">{formatPrice(skin.price)}</span>
+                            </div>
+                            <div className="mt-1 flex items-center justify-between text-[6.5px] font-semibold text-white/25">
+                              <span>перекруты</span>
+                              <span className={dropItem.attemptsLeft <= 0 ? 'text-[#ff9aac]' : 'text-acid'}>
+                                {dropItem.attemptsLeft}/{dropItem.attemptsTotal || 5}
+                              </span>
                             </div>
                           </div>
+                          {active && (
+                            <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-acid text-[8px] font-black text-[#041007]">✓</span>
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+
+                  <div className="mt-3 rounded-xl border border-white/[0.07] bg-black/20 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-[7px] font-black uppercase tracking-[0.12em] text-white/25">Выбранный дроп</div>
+                        <div className="mt-0.5 truncate text-[11px] font-extrabold" style={{ color: dropMeta.color }}>{drop.name}</div>
+                        <div className="text-[10px] font-extrabold tabular-nums text-acid">{formatPrice(drop.price)}</div>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <div className="text-[7px] font-black uppercase tracking-[0.1em] text-white/25">Перекруты</div>
+                        <div key={`${selectedDrop.id}-${selectedDrop.attemptsLeft}`} className="glyph-attempt-pulse mt-0.5 font-display text-[18px] font-black tabular-nums text-white">
+                          {selectedDrop.attemptsLeft}/{selectedDrop.attemptsTotal || 5}
                         </div>
                       </div>
                     </div>
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/[0.07] bg-black/20 px-3 py-2.5">
-                    <div>
-                      <div className="text-[7px] font-black uppercase tracking-[0.12em] text-white/25">Перекруты</div>
-                      <div key={session.attemptsLeft} className="glyph-attempt-pulse mt-0.5 font-display text-[18px] font-black tabular-nums text-white">
-                        {session.attemptsLeft}/{session.attemptsTotal || 5}
-                      </div>
-                    </div>
-                    <div className={cx('rounded-lg border px-2.5 py-1.5 text-right', net >= 0 ? 'border-acid/25 bg-acid/[0.06]' : 'border-[#ff5d7a]/25 bg-[#ff5d7a]/[0.06]')}>
-                      <div className="text-[7px] font-black uppercase tracking-[0.1em] text-white/25">{net >= 0 ? 'Окуп' : 'Минус'}</div>
-                      <div className={cx('text-[10px] font-extrabold tabular-nums', net >= 0 ? 'text-acid' : 'text-[#ff9aac]')}>
+                    <div className={cx('mt-2 flex items-center justify-between rounded-lg border px-2 py-1.5', net >= 0 ? 'border-acid/20 bg-acid/[0.05]' : 'border-[#ff5d7a]/20 bg-[#ff5d7a]/[0.05]')}>
+                      <span className="text-[7px] font-black uppercase tracking-[0.08em] text-white/30">{net >= 0 ? 'Окуп' : 'Минус'}</span>
+                      <span className={cx('text-[9px] font-extrabold tabular-nums', net >= 0 ? 'text-acid' : 'text-[#ff9aac]')}>
                         {net >= 0 ? '+' : '-'}{formatPrice(Math.abs(net))} ({netPercent >= 0 ? '+' : ''}{netPercent.toFixed(1)}%)
-                      </div>
+                      </span>
                     </div>
                   </div>
 
                   <button
                     type="button"
                     onClick={rerollDrop}
-                    disabled={Boolean(busy) || session.attemptsLeft <= 0 || !revealed}
+                    disabled={Boolean(busy) || selectedDrop.attemptsLeft <= 0}
                     className="btn-acid mt-3 w-full !py-3 !text-[10px] uppercase tracking-[0.08em] disabled:opacity-40"
                   >
                     {busy === 'reroll' ? (
@@ -2668,10 +2697,10 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                         <span className="spin-ring h-4 w-4 rounded-full border-2 border-[#041007]/30 border-t-[#041007]" />
                         Меняем дроп...
                       </>
-                    ) : session.attemptsLeft > 0 ? (
+                    ) : selectedDrop.attemptsLeft > 0 ? (
                       <>
                         <Icon name="refresh" size={14} />
-                        Перекрутить · {session.attemptsLeft}/{session.attemptsTotal || 5}
+                        Перекрутить · {selectedDrop.attemptsLeft}/{selectedDrop.attemptsTotal || 5}
                       </>
                     ) : (
                       'Перекруты закончились'
@@ -2682,7 +2711,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                     <button
                       type="button"
                       onClick={collectDrop}
-                      disabled={Boolean(busy) || !revealed}
+                      disabled={Boolean(busy)}
                       className="rounded-xl border border-acid/25 bg-acid/[0.07] px-2 py-2.5 text-[8px] font-black uppercase tracking-[0.08em] text-acid transition hover:bg-acid/[0.14] disabled:opacity-40"
                     >
                       Собрать
@@ -2690,7 +2719,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                     <button
                       type="button"
                       onClick={sellDrop}
-                      disabled={Boolean(busy) || !revealed}
+                      disabled={Boolean(busy)}
                       className="rounded-xl border border-[#ffcf4d]/25 bg-[#ffcf4d]/[0.06] px-2 py-2.5 text-[8px] font-black uppercase tracking-[0.08em] text-[#ffe6a3] transition hover:bg-[#ffcf4d]/[0.12] disabled:opacity-40"
                     >
                       Продать за {formatPrice(drop.price)}
@@ -2700,7 +2729,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                   <div className="mt-3">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-[7px] font-black uppercase tracking-[0.14em] text-white/30">Кинуть в апгрейд</span>
-                      <span className="text-[7px] font-semibold text-white/22">скин уйдёт в апгрейд</span>
+                      <span className="text-[7px] font-semibold text-white/22">выбранный скин уйдёт в апгрейд</span>
                     </div>
                     {upgradeMultiplier ? (
                       <div className="mt-1.5 rounded-xl border border-[#b58bff]/30 bg-[#b58bff]/[0.08] p-3">
@@ -2741,7 +2770,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                           )}
                         </button>
                         <div className="mt-1.5 text-center text-[7px] font-semibold text-white/22">
-                          Текущий дроп сгорит при провале
+                          Выбранный дроп сгорит при провале
                         </div>
                       </div>
                     ) : (
@@ -2753,7 +2782,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                               key={multiplier}
                               type="button"
                               onClick={() => prepareUpgrade(multiplier)}
-                              disabled={upgradeBusy || !revealed}
+                              disabled={upgradeBusy}
                               className="rounded-lg border border-[#b58bff]/25 bg-[#b58bff]/[0.07] px-1 py-2 text-center transition hover:bg-[#b58bff]/[0.14] disabled:opacity-40"
                             >
                               <div className="text-[11px] font-black text-[#d7c4ff]">x{multiplier}</div>
@@ -2767,14 +2796,14 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                       <div className="mt-2 text-[8px] font-semibold text-[#ff9aac]">{upgradeError}</div>
                     )}
                     <div className="mt-2 text-center text-[7px] font-semibold leading-relaxed text-white/22">
-                      Апгрейд забирает текущий дроп. При провале скин сгорает, 5–10% вернётся на баланс.
+                      Апгрейд забирает только выбранный дроп. При провале скин сгорает, 5–10% вернётся на баланс.
                     </div>
                   </div>
 
                   <div className="mt-2 text-center text-[7px] font-semibold text-white/20">
-                    {session.attemptsLeft > 0
+                    {selectedDrop.attemptsLeft > 0
                       ? 'Старый дроп сгорает при каждом перекруте'
-                      : 'Перекруты закончились — собери, продай или отправь в апгрейд'}
+                      : 'На этой карте перекруты закончились'}
                   </div>
                 </div>
               ) : (
