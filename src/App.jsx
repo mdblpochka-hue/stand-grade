@@ -8,6 +8,9 @@ import {
   useState,
 } from 'react'
 import {
+  createPortal,
+} from 'react-dom'
+import {
   isSoundEnabled,
   playCaseResult,
   playCoin,
@@ -1981,78 +1984,105 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   const [selectedDropIds, setSelectedDropIds] = useState([])
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
-  const [upgradeMultiplier, setUpgradeMultiplier] = useState(null)
-  const [upgradeResult, setUpgradeResult] = useState(null)
-  const [upgradeRevealed, setUpgradeRevealed] = useState(false)
-  const [upgradeBusy, setUpgradeBusy] = useState(false)
+  const [upgradeMultiplier, setUpgradeMultiplier] = useState(2)
+  const [upgradePhase, setUpgradePhase] = useState(null)
+  const [upgradeResults, setUpgradeResults] = useState([])
   const [upgradeError, setUpgradeError] = useState('')
   const actionRef = useRef(false)
   const stopSoundRef = useRef(null)
+  const pendingUpgradeRef = useRef(null)
   const upgradeDuration = fast ? ANIM_MS_FAST : ANIM_MS_NORMAL
 
   const activeDeck =
     glyphs.find((deck) => deck.id === (session?.deckId || activeDeckId)) || null
   const drops = session?.drops || []
-  const selectedDrops = drops.filter((drop) => selectedDropIds.includes(drop.id))
+  const selectableDrops = drops.filter((drop) => !drop.failed)
+  const selectedDrops = selectableDrops.filter((drop) => selectedDropIds.includes(drop.id))
+  const hasFailed = drops.some((drop) => drop.failed)
   const selectedValue = selectedDrops.reduce(
     (sum, drop) => sum + drop.currentDrop.price,
     0,
   )
-  const selectedCost = selectedDrops.length * (Number(session?.cardPrice) || 0)
-  const selectedNet = selectedValue - selectedCost
-  const selectedNetPercent = selectedCost > 0 ? (selectedNet / selectedCost) * 100 : 0
+  const upgradeChance = Math.round((90 / (upgradeMultiplier || 2)) * 10) / 10
+  const resultsByDrop = new Map(
+    upgradeResults.map((result) => [result.dropId, result]),
+  )
+  const allSelected =
+    selectableDrops.length > 0 && selectedDrops.length === selectableDrops.length
+  const cardGridClass =
+    drops.length <= 1
+      ? 'grid-cols-1 max-w-[380px]'
+      : drops.length === 2
+        ? 'grid-cols-2 max-w-[720px]'
+        : drops.length === 3
+          ? 'grid-cols-2 max-w-[1020px] sm:grid-cols-3'
+          : drops.length === 4
+            ? 'grid-cols-2 max-w-[1200px] sm:grid-cols-4'
+            : 'grid-cols-2 max-w-[1360px] sm:grid-cols-3 lg:grid-cols-5'
 
   useEffect(() => {
     setSelectedDropIds((previous) => {
-      const next = previous.filter((id) => drops.some((drop) => drop.id === id))
+      const next = previous.filter((id) =>
+        drops.some((drop) => drop.id === id && !drop.failed),
+      )
       return next.length === previous.length ? previous : next
     })
-  }, [session?.id, drops.map((drop) => drop.id).join('|')])
+  }, [session?.id, drops.map((drop) => `${drop.id}:${drop.failed ? 1 : 0}`).join('|')])
 
   useEffect(() => {
-    if (!upgradeResult) {
-      setUpgradeRevealed(false)
-      return undefined
-    }
-    setUpgradeRevealed(false)
+    if (upgradePhase !== 'spinning' || !upgradeResults.length) return undefined
     const stopSound = startSpinSound(upgradeDuration, 'upgrade')
     stopSoundRef.current = stopSound
+    const wins = upgradeResults.filter((result) => result.won).length
+    const compensationTotal = upgradeResults.reduce(
+      (sum, result) => sum + (Number(result.compensation) || 0),
+      0,
+    )
     const timer = setTimeout(() => {
       stopSound()
       if (stopSoundRef.current === stopSound) stopSoundRef.current = null
-      setUpgradeRevealed(true)
-      playUpgradeResult(upgradeResult.won)
-      if (upgradeResult.message) {
-        onToast(upgradeResult.message, upgradeResult.won ? 'success' : 'error')
+      const pending = pendingUpgradeRef.current
+      if (pending) {
+        onUpdate(pending)
+        setSelectedDropIds(
+          (pending.glyphDrop?.drops || [])
+            .filter((drop) => !drop.failed)
+            .map((drop) => drop.id),
+        )
+        pendingUpgradeRef.current = null
       }
+      setUpgradePhase('result')
+      playUpgradeResult(wins > 0)
+      onToast(
+        `x${upgradeMultiplier}: успешно ${wins} из ${upgradeResults.length}${compensationTotal > 0 ? ` · компенсация +${formatPrice(compensationTotal)}` : ''}`,
+        wins > 0 ? 'success' : 'error',
+      )
     }, upgradeDuration + 120)
     return () => {
       clearTimeout(timer)
       stopSound()
       if (stopSoundRef.current === stopSound) stopSoundRef.current = null
     }
-  }, [upgradeResult, upgradeDuration, onToast])
+  }, [upgradePhase, upgradeResults, upgradeDuration, upgradeMultiplier, onUpdate, onToast])
 
-  function closeModal() {
-    if (upgradeResult && !upgradeRevealed) return
-    setModalOpen(false)
-    setDeckPreview(false)
-    setUpgradeResult(null)
-    setUpgradeMultiplier(null)
-    setUpgradeRevealed(false)
+  function resetUpgrade() {
+    setUpgradePhase(null)
+    setUpgradeResults([])
     setUpgradeError('')
+    pendingUpgradeRef.current = null
   }
 
-  function finishUpgrade() {
-    setUpgradeResult(null)
-    setUpgradeMultiplier(null)
-    setUpgradeRevealed(false)
-    setUpgradeError('')
-    if (user.glyphDrop) {
-      setSelectedDropIds([])
-    } else {
-      setModalOpen(false)
-    }
+  function closeModal() {
+    if (upgradePhase === 'spinning') return
+    setModalOpen(false)
+    setDeckPreview(false)
+    resetUpgrade()
+  }
+
+  function applySelection(glyphDrop) {
+    setSelectedDropIds(
+      (glyphDrop?.drops || []).filter((drop) => !drop.failed).map((drop) => drop.id),
+    )
   }
 
   useEscape(closeModal, modalOpen)
@@ -2080,10 +2110,9 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       setActiveDeckId(deck.id)
       setModalOpen(true)
       setDeckPreview(false)
-      setSelectedDropIds([])
-      setUpgradeResult(null)
-      setUpgradeMultiplier(null)
-      setUpgradeError('')
+      applySelection(data.glyphDrop)
+      resetUpgrade()
+      setUpgradeMultiplier(2)
     } catch (requestError) {
       setError(requestError.message)
       onToast(requestError.message, 'error')
@@ -2099,16 +2128,15 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       setActiveDeckId(session.deckId)
       setModalOpen(true)
       setDeckPreview(false)
+      resetUpgrade()
       return
     }
     setActiveDeckId(deck.id)
     setOpenCount(1)
     setDeckPreview(true)
     setModalOpen(true)
-    setUpgradeResult(null)
-    setUpgradeMultiplier(null)
-    setUpgradeRevealed(false)
-    setUpgradeError('')
+    resetUpgrade()
+    setUpgradeMultiplier(2)
     setError('')
   }
 
@@ -2117,9 +2145,8 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
     setActiveDeckId(session.deckId)
     setModalOpen(true)
     setDeckPreview(false)
-    setUpgradeResult(null)
-    setUpgradeMultiplier(null)
-    setUpgradeError('')
+    applySelection(session)
+    resetUpgrade()
   }
 
   async function rerollDrop() {
@@ -2134,10 +2161,8 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
         token,
       })
       onUpdate(data)
-      setSelectedDropIds([])
-      setUpgradeResult(null)
-      setUpgradeMultiplier(null)
-      setUpgradeError('')
+      applySelection(data.glyphDrop)
+      resetUpgrade()
     } catch (requestError) {
       setError(requestError.message)
       onToast(requestError.message, 'error')
@@ -2149,7 +2174,8 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   }
 
   async function collectDrop() {
-    if (!session || !selectedDropIds.length || actionRef.current || busy) return
+    if (!session || actionRef.current || busy) return
+    if (!selectedDropIds.length && !hasFailed) return
     actionRef.current = true
     setBusy('collect')
     setError('')
@@ -2162,11 +2188,9 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       onUpdate(data)
       playCoin()
       onToast(data.message, 'success', 'Дроп забран')
-      setSelectedDropIds([])
       if (data.glyphDrop) {
-        setUpgradeResult(null)
-        setUpgradeMultiplier(null)
-        setUpgradeError('')
+        applySelection(data.glyphDrop)
+        resetUpgrade()
       } else {
         closeModal()
       }
@@ -2181,7 +2205,8 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   }
 
   async function sellDrop() {
-    if (!session || !selectedDropIds.length || actionRef.current || busy) return
+    if (!session || actionRef.current || busy) return
+    if (!selectedDropIds.length && !hasFailed) return
     actionRef.current = true
     setBusy('sell')
     setError('')
@@ -2194,11 +2219,9 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       onUpdate(data)
       playCoin()
       onToast(data.message, 'success', 'Дроп продан')
-      setSelectedDropIds([])
       if (data.glyphDrop) {
-        setUpgradeResult(null)
-        setUpgradeMultiplier(null)
-        setUpgradeError('')
+        applySelection(data.glyphDrop)
+        resetUpgrade()
       } else {
         closeModal()
       }
@@ -2212,58 +2235,75 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
     }
   }
 
-  function prepareUpgrade(multiplier) {
-    if (!session || !selectedDropIds.length || upgradeBusy) return
+  function chooseMultiplier(multiplier) {
+    if (upgradePhase === 'spinning') return
     setUpgradeMultiplier(multiplier)
+    setUpgradeError('')
+    if (upgradePhase === 'result') resetUpgrade()
+  }
+
+  function enterUpgradeConfirm() {
+    if (!session || !selectedDrops.length || upgradePhase === 'spinning') return
+    setUpgradePhase('confirm')
+    setUpgradeResults([])
     setUpgradeError('')
   }
 
-  async function runUpgrade(multiplier) {
-    if (!session || !selectedDropIds.length || upgradeBusy || actionRef.current) return
+  function cancelUpgrade() {
+    if (upgradePhase === 'spinning') return
+    resetUpgrade()
+  }
+
+  async function runUpgrade() {
+    if (
+      !session ||
+      !selectedDrops.length ||
+      upgradePhase === 'spinning' ||
+      actionRef.current
+    ) {
+      return
+    }
     actionRef.current = true
-    setUpgradeBusy(true)
-    setUpgradeMultiplier(multiplier)
+    setUpgradePhase('spinning')
     setUpgradeError('')
-    setUpgradeResult(null)
-    setUpgradeRevealed(false)
     unlockAudio()
     try {
       const data = await apiRequest('/api/glyph/upgrade', {
         method: 'POST',
         token,
-        body: { multiplier, dropIds: selectedDropIds },
+        body: { multiplier: upgradeMultiplier, dropIds: selectedDropIds },
       })
-      onUpdate(data)
-      setUpgradeResult(data)
+      pendingUpgradeRef.current = data
+      setUpgradeResults(data.results || [])
     } catch (requestError) {
+      setUpgradePhase('confirm')
       setUpgradeError(requestError.message)
       onToast(requestError.message, 'error')
       if (requestError.data?.user) onUpdate(requestError.data)
     } finally {
-      setUpgradeBusy(false)
       actionRef.current = false
     }
   }
 
   function toggleDrop(dropId) {
+    if (upgradePhase === 'spinning') return
+    if (upgradePhase) resetUpgrade()
     setSelectedDropIds((previous) =>
       previous.includes(dropId)
         ? previous.filter((id) => id !== dropId)
         : [...previous, dropId],
     )
-    setUpgradeMultiplier(null)
-    setUpgradeError('')
   }
 
   function toggleSelectAll() {
+    if (upgradePhase === 'spinning') return
+    if (upgradePhase) resetUpgrade()
     setSelectedDropIds((previous) =>
-      previous.length === drops.length ? [] : drops.map((drop) => drop.id),
+      previous.length === selectableDrops.length
+        ? []
+        : selectableDrops.map((drop) => drop.id),
     )
-    setUpgradeMultiplier(null)
-    setUpgradeError('')
   }
-
-  const allSelected = drops.length > 0 && selectedDropIds.length === drops.length
 
   return (
     <section id="glyphs" className="pt-10 sm:pt-14">
@@ -2388,9 +2428,11 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
         })}
       </div>
 
-      {modalOpen && activeDeck && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[#030604]/88 p-3 backdrop-blur-md"
+      {modalOpen &&
+        activeDeck &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-[#030604]/88 p-3 backdrop-blur-md"
           role="dialog"
           aria-modal="true"
           aria-label={`Глиф · ${activeDeck.name}`}
@@ -2398,12 +2440,17 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
             if (event.target === event.currentTarget) closeModal()
           }}
         >
-          <div className="pop-in relative max-h-[92vh] w-full max-w-[440px] overflow-y-auto rounded-[26px] border border-white/[0.1] bg-[#0b120d] shadow-panel">
+          <div
+            className={cx(
+              'pop-in relative flex max-h-[92vh] w-full flex-col overflow-hidden rounded-[26px] border border-white/[0.1] bg-[#0b120d] shadow-panel',
+              deckPreview ? 'max-w-[470px]' : 'max-w-[1400px]',
+            )}
+          >
             <div
               className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full blur-[70px]"
               style={{ backgroundColor: `${activeDeck.accent}22` }}
             />
-            <div className="relative flex items-center justify-between gap-2 border-b border-white/[0.07] px-4 py-3">
+            <div className="relative flex shrink-0 items-center justify-between gap-2 border-b border-white/[0.07] px-4 py-3">
               <div className="min-w-0">
                 <div className="text-[7px] font-black uppercase tracking-[0.18em]" style={{ color: activeDeck.accent }}>
                   {activeDeck.kicker}
@@ -2424,7 +2471,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                 <button
                   type="button"
                   onClick={closeModal}
-                  disabled={Boolean(upgradeResult && !upgradeRevealed)}
+                  disabled={upgradePhase === 'spinning'}
                   className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.09] text-white/45 transition hover:border-white/20 hover:text-white disabled:opacity-30"
                   aria-label="Закрыть"
                 >
@@ -2433,14 +2480,15 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
               </div>
             </div>
 
-            <div className="relative p-4">
+            <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
               {deckPreview ? (
                 (() => {
                   const top = activeDeck.featuredSkin || activeDeck.topPrize || activeDeck.contents?.[0]
                   const meta = top ? RARITY[top.rarity] || RARITY.Common : RARITY.Common
                   const total = activeDeck.price * openCount
                   return (
-                    <div>
+                    <div className="flex-1 overflow-y-auto p-4">
+                      <div className="mx-auto w-full max-w-[440px]">
                       <div className="flex justify-center">
                         <GlyphCardBack deck={activeDeck} className="h-[220px] w-[165px]" />
                       </div>
@@ -2535,336 +2583,275 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                         )}
                       </button>
                       <div className="mt-2 text-center text-[7px] font-semibold leading-relaxed text-white/22">
-                        {openCount > 1 ? `${openCount} карты в пачке · ` : ''}
+                        {openCount > 1
+                          ? `${openCount} ${openCount < 5 ? 'карты' : 'карт'} в пачке · `
+                          : ''}
                         перекрут заменяет всю пачку сразу
+                      </div>
                       </div>
                     </div>
                   )
                 })()
-              ) : upgradeResult ? (
-                <div>
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <div className="text-[8px] font-black uppercase tracking-[0.16em] text-white/30">
-                        Апгрейд x{upgradeResult.multiplier}
-                      </div>
-                      <div
-                        className={cx(
-                          'mt-1 font-display text-[20px] font-black',
-                          upgradeRevealed
-                            ? upgradeResult.won
-                              ? 'text-acid'
-                              : 'text-[#ff9aac]'
-                            : 'text-white/70',
-                        )}
-                      >
-                        {upgradeRevealed ? (upgradeResult.won ? 'Успех' : 'Провал') : 'Крутим колесо...'}
-                      </div>
-                      <div className="mt-1 text-[8px] font-semibold text-white/30">
-                        шанс {upgradeResult.chance}%
-                        {upgradeRevealed
-                          ? ` · ролл ${Number(upgradeResult.roll).toFixed(2)}%`
-                          : ' · результат после остановки'}
-                      </div>
-                    </div>
-                    {upgradeRevealed ? (
-                      <div className={cx('rounded-xl border px-3 py-2 text-right', upgradeResult.net >= 0 ? 'border-acid/25 bg-acid/[0.06]' : 'border-[#ff5d7a]/25 bg-[#ff5d7a]/[0.06]')}>
-                        <div className="text-[7px] font-black uppercase tracking-[0.12em] text-white/25">Итог</div>
-                        <div className={cx('text-[13px] font-extrabold tabular-nums', upgradeResult.net >= 0 ? 'text-acid' : 'text-[#ff9aac]')}>
-                          {upgradeResult.net >= 0 ? '+' : '-'}
-                          {formatPrice(Math.abs(upgradeResult.net))}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex h-10 items-center gap-2 rounded-xl border border-white/[0.08] bg-black/20 px-3">
-                        <span className="spin-ring h-4 w-4 rounded-full border-2 border-acid/15 border-t-acid" />
-                        <span className="text-[7px] font-black uppercase tracking-[0.1em] text-white/30">ожидание</span>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="mt-3 flex flex-col items-center">
-                    <ProbabilityWheel
-                      chance={upgradeResult.chance}
-                      roll={upgradeResult.roll}
-                      size={230}
-                      duration={upgradeDuration}
-                      spinKey={upgradeResult.roll}
-                    >
-                      <span className="relative text-[7px] font-black uppercase tracking-[0.18em] text-white/28">шанс</span>
-                      <span className="relative mt-1 font-display text-[30px] font-black text-white">{Math.round(upgradeResult.chance)}%</span>
-                    </ProbabilityWheel>
-                  </div>
-
-                  {upgradeRevealed ? (
-                    <>
-                      <div className="mt-3 rounded-xl border border-white/[0.07] bg-black/20 p-3">
-                        {upgradeResult.won ? (
-                          <>
-                            <div className="text-[8px] font-black uppercase tracking-[0.14em] text-acid/70">Получен скин</div>
-                            <div className="mt-1 text-[12px] font-extrabold text-white">{upgradeResult.wonItem?.name || upgradeResult.targetSkin?.name}</div>
-                            <div className="mt-1 text-[11px] font-extrabold tabular-nums text-acid">
-                              {formatPrice(upgradeResult.wonItem?.price || upgradeResult.targetSkin?.price || 0)}
+              ) : session && drops.length ? (
+                <div className="flex min-h-0 flex-1 flex-col">
+                  <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-5">
+                    <div className={cx('mx-auto grid gap-2 sm:gap-3', cardGridClass)}>
+                      {drops.map((dropItem) => {
+                        const skin = dropItem.currentDrop
+                        const meta = RARITY[skin.rarity] || RARITY.Common
+                        const selected = selectedDropIds.includes(dropItem.id)
+                        const result = resultsByDrop.get(dropItem.id)
+                        const chance = result?.chance ?? upgradeChance
+                        const showWheel =
+                          !dropItem.failed &&
+                          ((upgradePhase === 'confirm' && selected) ||
+                            (upgradePhase === 'spinning' && Boolean(result)))
+                        const showSuccess = upgradePhase === 'result' && Boolean(result?.won)
+                        return (
+                          <button
+                            key={dropItem.id}
+                            type="button"
+                            onClick={() => toggleDrop(dropItem.id)}
+                            disabled={
+                              dropItem.failed ||
+                              upgradePhase === 'confirm' ||
+                              upgradePhase === 'spinning'
+                            }
+                            className={cx(
+                              'group relative aspect-[7/10] w-full overflow-hidden rounded-[18px] border text-left transition duration-200 disabled:cursor-default',
+                              selected && !dropItem.failed
+                                ? 'border-acid/65 shadow-[0_0_34px_rgba(53,255,135,.18)]'
+                                : 'border-white/[0.1]',
+                              !dropItem.failed && !upgradePhase && 'hover:-translate-y-0.5 hover:border-white/25',
+                            )}
+                          >
+                            <div className="absolute inset-0">
+                              <SkinVisual skin={skin} className="h-full w-full" showRarity={false} />
                             </div>
+                            <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#040905]/90 via-[#040905]/5 to-[#040905]/50" />
+                            <div className="relative flex h-full flex-col p-2 sm:p-2.5">
+                              <div className="flex justify-center">
+                                <span className="rounded-md border border-white/[0.12] bg-black/45 px-2 py-0.5 text-[10px] font-black tabular-nums text-white/85 backdrop-blur-sm">
+                                  {formatPrice(skin.price)}
+                                </span>
+                              </div>
+                              <div className="mt-auto text-center">
+                                <div className="text-[7px] font-black uppercase tracking-[0.18em] text-white/45">
+                                  {skin.weapon || meta.label}
+                                </div>
+                                <div className="mt-0.5 truncate text-[11px] font-extrabold leading-tight text-white">
+                                  {skin.baseName || skin.name}
+                                </div>
+                              </div>
+                            </div>
+
+                            {selected && !dropItem.failed && !upgradePhase && (
+                              <span className="absolute right-2 top-2 z-20 flex h-5 w-5 items-center justify-center rounded-full bg-acid text-[10px] font-black text-[#041007] shadow-[0_0_14px_rgba(53,255,135,.55)]">
+                                ✓
+                              </span>
+                            )}
+
+                            {showWheel && (
+                              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-1 bg-[#030805]/60 backdrop-blur-[2px]">
+                                <ProbabilityWheel
+                                  chance={chance}
+                                  roll={
+                                    upgradePhase === 'spinning'
+                                      ? result?.roll ?? null
+                                      : null
+                                  }
+                                  size={150}
+                                  duration={upgradeDuration}
+                                  spinKey={
+                                    result
+                                      ? dropItem.id + '-' + String(result.roll)
+                                      : dropItem.id + '-idle'
+                                  }
+                                >
+                                  <span className="text-[6px] font-black uppercase tracking-[0.14em] text-white/40">
+                                    Шанс успеха
+                                  </span>
+                                  <span className="mt-0.5 font-display text-[16px] font-black leading-none text-white">
+                                    {Number(chance).toFixed(2)}%
+                                  </span>
+                                  <span className="mt-1 rounded border border-white/[0.14] bg-black/40 px-1.5 py-0.5 text-[7px] font-bold text-white/65">
+                                    x{upgradeMultiplier}.00
+                                  </span>
+                                </ProbabilityWheel>
+                              </div>
+                            )}
+
+                            {showSuccess && (
+                              <span className="absolute left-2 top-2 z-20 rounded-md bg-acid px-1.5 py-0.5 text-[7px] font-black uppercase tracking-[0.06em] text-[#041007]">
+                                успех x{upgradeMultiplier}
+                              </span>
+                            )}
+
+                            {dropItem.failed && (
+                              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#030805]/65 px-2 text-center backdrop-blur-md">
+                                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#ff4d6d] text-[18px] font-black leading-none text-white shadow-[0_0_18px_rgba(255,77,109,.45)]">
+                                  ×
+                                </span>
+                                <div className="mt-2 text-[9px] font-extrabold text-white">
+                                  Апгрейд не прошёл
+                                </div>
+                                {Number(dropItem.compensation) > 0 && (
+                                  <div className="mt-0.5 text-[8px] font-bold text-[#ffb3c1]">
+                                    +{formatPrice(dropItem.compensation)}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="relative shrink-0 border-t border-white/[0.08] bg-[#080f0a]/95 px-3 py-2.5 backdrop-blur sm:px-5 sm:py-3">
+                    <div className="mb-2 flex items-center justify-center gap-2">
+                      <span className="text-[8px] font-black uppercase tracking-[0.14em] text-white/35">
+                        Перекруты {session.attemptsLeft}/{session.attemptsTotal || 5}
+                      </span>
+                      <span className="flex items-center gap-0.5 text-[13px] leading-none">
+                        {Array.from({ length: session.attemptsTotal || 5 }).map((_, index) => (
+                          <span
+                            key={index}
+                            className={cx(
+                              index < session.attemptsLeft
+                                ? 'text-acid drop-shadow-[0_0_6px_rgba(53,255,135,.55)]'
+                                : 'text-white/10',
+                            )}
+                          >
+                            ⚡
+                          </span>
+                        ))}
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex shrink-0 gap-1.5">
+                        {[2, 3, 5, 10].map((multiplier) => (
+                          <button
+                            key={multiplier}
+                            type="button"
+                            onClick={() => chooseMultiplier(multiplier)}
+                            disabled={upgradePhase === 'spinning'}
+                            className={cx(
+                              'h-9 w-11 rounded-lg border text-[10px] font-black tabular-nums transition disabled:opacity-40',
+                              upgradeMultiplier === multiplier
+                                ? 'border-acid/60 bg-acid/[0.12] text-acid'
+                                : 'border-white/[0.1] bg-white/[0.03] text-white/45 hover:border-white/25 hover:text-white',
+                            )}
+                          >
+                            x{multiplier}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="flex min-w-0 flex-1 flex-wrap items-center justify-center gap-1.5 sm:gap-2">
+                        {upgradePhase === 'confirm' || upgradePhase === 'spinning' ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={cancelUpgrade}
+                              disabled={upgradePhase === 'spinning'}
+                              className="h-9 rounded-lg border border-white/[0.12] bg-white/[0.04] px-4 text-[9px] font-black uppercase tracking-[0.08em] text-white/70 transition hover:bg-white/[0.08] disabled:opacity-40"
+                            >
+                              Отмена
+                            </button>
+                            <button
+                              type="button"
+                              onClick={runUpgrade}
+                              disabled={upgradePhase === 'spinning'}
+                              className="h-9 rounded-lg border border-acid/60 bg-acid px-7 text-[9px] font-black uppercase tracking-[0.1em] text-[#041007] shadow-[0_0_24px_rgba(53,255,135,.28)] transition hover:bg-[#5cffa0] disabled:opacity-50"
+                            >
+                              Апгрейд
+                            </button>
                           </>
                         ) : (
                           <>
-                            <div className="text-[8px] font-black uppercase tracking-[0.14em] text-[#ff9aac]/70">Компенсация</div>
-                            <div className="mt-1 text-[12px] font-extrabold text-[#ff9aac]">+{formatPrice(upgradeResult.compensation || 0)}</div>
-                            <div className="mt-1 text-[8px] font-semibold text-white/28">Дроп сгорел, 5–10% стоимости вернулось на баланс.</div>
+                            <button
+                              type="button"
+                              onClick={collectDrop}
+                              disabled={Boolean(busy) || (!selectedDrops.length && !hasFailed)}
+                              className="h-9 rounded-lg border border-white/[0.12] bg-white/[0.04] px-4 text-[9px] font-black uppercase tracking-[0.08em] text-white/75 transition hover:bg-white/[0.08] disabled:opacity-35"
+                            >
+                              Забрать
+                            </button>
+                            <button
+                              type="button"
+                              onClick={rerollDrop}
+                              disabled={Boolean(busy) || session.attemptsLeft <= 0}
+                              className="h-9 rounded-lg border border-acid/25 bg-acid/[0.06] px-4 text-[9px] font-black uppercase tracking-[0.08em] text-acid transition hover:bg-acid/[0.12] disabled:opacity-35"
+                            >
+                              {busy === 'reroll' ? 'Меняем...' : 'Поменять все'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={enterUpgradeConfirm}
+                              disabled={Boolean(busy) || !selectedDrops.length}
+                              className="h-9 rounded-lg border border-acid/60 bg-acid px-6 text-[9px] font-black uppercase tracking-[0.1em] text-[#041007] shadow-[0_0_24px_rgba(53,255,135,.28)] transition hover:bg-[#5cffa0] disabled:opacity-40"
+                            >
+                              Апгрейд
+                            </button>
+                            <button
+                              type="button"
+                              onClick={sellDrop}
+                              disabled={Boolean(busy) || (!selectedDrops.length && !hasFailed)}
+                              className="h-9 rounded-lg border border-[#ffcf4d]/25 bg-[#ffcf4d]/[0.06] px-4 text-[9px] font-black uppercase tracking-[0.08em] text-[#ffe6a3] transition hover:bg-[#ffcf4d]/[0.12] disabled:opacity-35"
+                            >
+                              Продать {formatPrice(selectedValue)}
+                            </button>
                           </>
                         )}
                       </div>
 
                       <button
                         type="button"
-                        onClick={finishUpgrade}
-                        className="btn-acid mt-3 w-full !py-3 !text-[10px] uppercase tracking-[0.08em]"
+                        onClick={toggleSelectAll}
+                        disabled={upgradePhase === 'confirm' || upgradePhase === 'spinning'}
+                        className="hidden h-9 shrink-0 rounded-lg border border-white/[0.1] bg-white/[0.03] px-3 text-[8px] font-black uppercase tracking-[0.06em] text-white/45 transition hover:border-white/25 hover:text-white disabled:opacity-30 sm:block"
                       >
-                        Готово
+                        {allSelected ? 'Снять выбор' : 'Выбрать все'}
                       </button>
-                    </>
-                  ) : (
-                    <div className="mt-3 flex items-center justify-center gap-2 rounded-xl border border-white/[0.07] bg-black/20 py-4">
-                      <span className="spin-ring h-4 w-4 rounded-full border-2 border-acid/15 border-t-acid" />
-                      <span className="text-[8px] font-black uppercase tracking-[0.12em] text-white/35">колесо крутится</span>
                     </div>
-                  )}
-                </div>
-              ) : session && drops.length ? (
-                <div>
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="text-[7px] font-black uppercase tracking-[0.14em] text-white/30">
-                        Открыто карт · {drops.length}
-                      </div>
-                      <div className="mt-0.5 text-[8px] font-semibold text-white/28">
-                        Нажми на карту, чтобы выбрать. Можно выбрать несколько.
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={toggleSelectAll}
-                      className="shrink-0 rounded-lg border border-white/[0.09] px-2 py-1.5 text-[7px] font-black uppercase tracking-[0.06em] text-white/45 transition hover:border-white/25 hover:text-white"
-                    >
-                      {allSelected ? 'Снять выбор' : 'Выбрать все'}
-                    </button>
-                  </div>
 
-                  <div className="mt-2 flex gap-2 overflow-x-auto pb-2">
-                    {drops.map((dropItem) => {
-                      const skin = dropItem.currentDrop
-                      const meta = RARITY[skin.rarity] || RARITY.Common
-                      const active = selectedDropIds.includes(dropItem.id)
-                      return (
-                        <button
-                          key={dropItem.id}
-                          type="button"
-                          onClick={() => toggleDrop(dropItem.id)}
-                          className={cx(
-                            'relative w-[94px] shrink-0 overflow-hidden rounded-xl border bg-[#0d150f] text-left transition',
-                            active
-                              ? 'border-acid/60 shadow-[0_0_22px_rgba(53,255,135,.2)]'
-                              : 'border-white/[0.08] hover:border-white/20',
-                          )}
-                        >
-                          <SkinVisual skin={skin} className="h-[100px] w-full" showRarity={false} />
-                          <div className="p-1.5">
-                            <div className="truncate text-[7px] font-bold text-white/70">{skin.name}</div>
-                            <div className="mt-0.5 flex items-center justify-between gap-1">
-                              <span className="truncate text-[6px] font-black uppercase" style={{ color: meta.color }}>{meta.label}</span>
-                              <span className="shrink-0 text-[7px] font-extrabold tabular-nums text-acid">{formatPrice(skin.price)}</span>
-                            </div>
-                          </div>
-                          <span
-                            className={cx(
-                              'absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full border text-[8px] font-black',
-                              active
-                                ? 'border-acid bg-acid text-[#041007]'
-                                : 'border-white/25 bg-black/50 text-transparent',
-                            )}
-                          >
-                            ✓
-                          </span>
-                        </button>
-                      )
-                    })}
-                  </div>
-
-                  <div className="mt-3 rounded-xl border border-white/[0.07] bg-black/20 p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="text-[7px] font-black uppercase tracking-[0.12em] text-white/25">Выбрано</div>
-                        <div className="mt-0.5 text-[11px] font-extrabold text-white">
-                          Выбрано: {selectedDrops.length} · всего {drops.length}
-                        </div>
-                        <div className="text-[10px] font-extrabold tabular-nums text-acid">
-                          {formatPrice(selectedValue)}
-                        </div>
-                      </div>
-                      <div className="shrink-0 text-right">
-                        <div className="text-[7px] font-black uppercase tracking-[0.1em] text-white/25">Перекруты пачки</div>
-                        <div key={`attempts-${session.attemptsLeft}`} className="glyph-attempt-pulse mt-0.5 font-display text-[18px] font-black tabular-nums text-white">
-                          {session.attemptsLeft}/{session.attemptsTotal || 5}
-                        </div>
-                      </div>
-                    </div>
-                    <div className={cx('mt-2 flex items-center justify-between rounded-lg border px-2 py-1.5', selectedNet >= 0 ? 'border-acid/20 bg-acid/[0.05]' : 'border-[#ff5d7a]/20 bg-[#ff5d7a]/[0.05]')}>
-                      <span className="text-[7px] font-black uppercase tracking-[0.08em] text-white/30">
-                        {selectedNet >= 0 ? 'Окуп' : 'Минус'} выбранного
-                      </span>
-                      <span className={cx('text-[9px] font-extrabold tabular-nums', selectedNet >= 0 ? 'text-acid' : 'text-[#ff9aac]')}>
-                        {selectedDrops.length
-                          ? `${selectedNet >= 0 ? '+' : '-'}${formatPrice(Math.abs(selectedNet))} (${selectedNetPercent >= 0 ? '+' : ''}${selectedNetPercent.toFixed(1)}%)`
-                          : '—'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={rerollDrop}
-                    disabled={Boolean(busy) || session.attemptsLeft <= 0}
-                    className="btn-acid mt-3 w-full !py-3 !text-[10px] uppercase tracking-[0.08em] disabled:opacity-40"
-                  >
-                    {busy === 'reroll' ? (
-                      <>
-                        <span className="spin-ring h-4 w-4 rounded-full border-2 border-[#041007]/30 border-t-[#041007]" />
-                        Перекручиваем пачку...
-                      </>
-                    ) : session.attemptsLeft > 0 ? (
-                      <>
-                        <Icon name="refresh" size={14} />
-                        Перекрутить всё · {session.attemptsLeft}/{session.attemptsTotal || 5}
-                      </>
-                    ) : (
-                      'Перекруты закончились'
-                    )}
-                  </button>
-                  <div className="mt-1.5 text-center text-[7px] font-semibold text-white/22">
-                    Перекрут заменит всю пачку сразу
-                  </div>
-
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={collectDrop}
-                      disabled={Boolean(busy) || !selectedDrops.length}
-                      className="rounded-xl border border-acid/25 bg-acid/[0.07] px-2 py-2.5 text-[8px] font-black uppercase tracking-[0.08em] text-acid transition hover:bg-acid/[0.14] disabled:opacity-40"
-                    >
-                      Собрать {selectedDrops.length ? `(${selectedDrops.length})` : ''}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={sellDrop}
-                      disabled={Boolean(busy) || !selectedDrops.length}
-                      className="rounded-xl border border-[#ffcf4d]/25 bg-[#ffcf4d]/[0.06] px-2 py-2.5 text-[8px] font-black uppercase tracking-[0.08em] text-[#ffe6a3] transition hover:bg-[#ffcf4d]/[0.12] disabled:opacity-40"
-                    >
-                      Продать {selectedDrops.length ? `за ${formatPrice(selectedValue)}` : ''}
-                    </button>
-                  </div>
-
-                  <div className="mt-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[7px] font-black uppercase tracking-[0.14em] text-white/30">Кинуть в апгрейд</span>
-                      <span className="text-[7px] font-semibold text-white/22">
-                        {selectedDrops.length
-                          ? `${selectedDrops.length} выбранных · база ${formatPrice(selectedValue)}`
-                          : 'сначала выбери карты'}
-                      </span>
-                    </div>
-                    {upgradeMultiplier ? (
-                      <div className="mt-1.5 rounded-xl border border-[#b58bff]/30 bg-[#b58bff]/[0.08] p-3">
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <div className="text-[7px] font-black uppercase tracking-[0.12em] text-[#d7c4ff]/60">
-                              Подтверждение
-                            </div>
-                            <div className="mt-0.5 text-[12px] font-black text-[#d7c4ff]">
-                              Апгрейд x{upgradeMultiplier} · выбрано: {selectedDrops.length}
-                            </div>
-                            <div className="mt-1 text-[8px] font-semibold text-white/35">
-                              Шанс {Math.round((90 / upgradeMultiplier) * 10) / 10}% · цель на {formatPrice(selectedValue * upgradeMultiplier)}
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setUpgradeMultiplier(null)}
-                            disabled={upgradeBusy}
-                            className="rounded-md border border-white/[0.09] px-2 py-1 text-[7px] font-black uppercase tracking-[0.06em] text-white/40 transition hover:border-white/20 hover:text-white disabled:opacity-30"
-                          >
-                            Отмена
-                          </button>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => runUpgrade(upgradeMultiplier)}
-                          disabled={upgradeBusy || !selectedDrops.length}
-                          className="btn-acid mt-2 w-full !py-2.5 !text-[9px] uppercase tracking-[0.08em] disabled:opacity-40"
-                        >
-                          {upgradeBusy ? (
-                            <>
-                              <span className="spin-ring h-3.5 w-3.5 rounded-full border-2 border-[#041007]/30 border-t-[#041007]" />
-                              Апгрейдим...
-                            </>
-                          ) : (
-                            'Апгрейд'
-                          )}
-                        </button>
-                        <div className="mt-1.5 text-center text-[7px] font-semibold text-white/22">
-                          Выбранные дропы сгорят при провале
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="mt-1.5 grid grid-cols-4 gap-1.5">
-                        {[2, 3, 5, 10].map((multiplier) => {
-                          const chance = Math.round((90 / multiplier) * 10) / 10
-                          return (
-                            <button
-                              key={multiplier}
-                              type="button"
-                              onClick={() => prepareUpgrade(multiplier)}
-                              disabled={upgradeBusy || !selectedDrops.length}
-                              className="rounded-lg border border-[#b58bff]/25 bg-[#b58bff]/[0.07] px-1 py-2 text-center transition hover:bg-[#b58bff]/[0.14] disabled:opacity-40"
-                            >
-                              <div className="text-[11px] font-black text-[#d7c4ff]">x{multiplier}</div>
-                              <div className="text-[6.5px] font-bold text-white/30">{chance}%</div>
-                            </button>
-                          )
-                        })}
-                      </div>
-                    )}
                     {upgradeError && (
-                      <div className="mt-2 text-[8px] font-semibold text-[#ff9aac]">{upgradeError}</div>
+                      <div className="mt-2 text-center text-[8px] font-semibold text-[#ff9aac]">
+                        {upgradeError}
+                      </div>
                     )}
-                    <div className="mt-2 text-center text-[7px] font-semibold leading-relaxed text-white/22">
-                      В апгрейд уходят только выбранные карты. При провале они сгорают, 5–10% вернётся на баланс.
+                    <div className="mt-1.5 text-center text-[7px] font-semibold text-white/22">
+                      {upgradePhase === 'confirm'
+                        ? 'Проверь шанс и запускай апгрейд'
+                        : upgradePhase === 'result'
+                          ? 'Выбери карты для следующего действия'
+                          : 'Клик по карте выбирает её · апгрейд идёт по выбранным'}
                     </div>
-                  </div>
-
-                  <div className="mt-2 text-center text-[7px] font-semibold text-white/20">
-                    {session.attemptsLeft > 0
-                      ? 'Каждый перекрут заменяет всю пачку'
-                      : 'Перекруты пачки закончились'}
                   </div>
                 </div>
               ) : (
-                <div className="flex min-h-[260px] flex-col items-center justify-center text-center">
-                  <Icon name="cards" size={28} className="text-white/20" />
-                  <div className="mt-2 text-[10px] font-bold text-white/35">Дроп закрыт</div>
-                  <button
-                    type="button"
-                    onClick={closeModal}
-                    className="mt-3 rounded-lg border border-white/[0.09] px-3 py-2 text-[8px] font-black uppercase tracking-[0.08em] text-white/45 hover:text-white"
-                  >
-                    Закрыть
-                  </button>
+                <div className="flex flex-1 items-center justify-center p-4">
+                  <div className="flex min-h-[260px] flex-col items-center justify-center text-center">
+                    <Icon name="cards" size={28} className="text-white/20" />
+                    <div className="mt-2 text-[10px] font-bold text-white/35">Дроп закрыт</div>
+                    <button
+                      type="button"
+                      onClick={closeModal}
+                      className="mt-3 rounded-lg border border-white/[0.09] px-3 py-2 text-[8px] font-black uppercase tracking-[0.08em] text-white/45 hover:text-white"
+                    >
+                      Закрыть
+                    </button>
+                  </div>
                 </div>
               )}
+
             </div>
           </div>
-        </div>
-      )}
+        </div>,
+          document.body,
+        )}
     </section>
   )
 }
@@ -2891,26 +2878,35 @@ function ProbabilityWheel({ chance = 35, roll = null, size = 230, duration = 110
   }, [roll, duration, spinKey])
 
   const green = Math.max(0, Math.min(100, Number(chance) || 0))
+  const innerInset = Math.max(18, Math.round(size * 0.18))
+  const tickTop = Math.max(4, Math.round(size * 0.043))
 
   return (
     <div className="relative shrink-0" style={{ width: size, height: size }}>
       <div className="pointer-events-none absolute -inset-4 rounded-full bg-acid/[0.06] blur-2xl" />
       <div className="absolute inset-0 rounded-full border border-white/[0.08] bg-[#060b07] shadow-[inset_0_0_60px_rgba(0,0,0,.85)]" />
       <div
-        className="absolute inset-[8px] rounded-full transition-[background] duration-300"
+        className="absolute rounded-full transition-[background] duration-300"
         style={{
+          inset: 8,
           background: `conic-gradient(#35ff87 0deg ${green * 3.6}deg, rgba(255,93,122,.3) ${green * 3.6}deg 360deg)`,
           filter: green ? 'drop-shadow(0 0 16px rgba(53,255,135,.16))' : 'none',
         }}
       />
-      <div className="absolute inset-[42px] rounded-full border border-white/[0.08] bg-[#080f0a] shadow-[inset_0_0_42px_rgba(0,0,0,.8)]" />
+      <div
+        className="absolute rounded-full border border-white/[0.08] bg-[#080f0a] shadow-[inset_0_0_42px_rgba(0,0,0,.8)]"
+        style={{ inset: innerInset }}
+      />
       {Array.from({ length: 40 }).map((_, tick) => (
         <div
           key={tick}
           className="pointer-events-none absolute inset-0"
           style={{ transform: `rotate(${tick * 9}deg)` }}
         >
-          <span className="absolute left-1/2 top-[10px] h-2 w-px -translate-x-1/2 bg-[#041007]/45" />
+          <span
+            className="absolute left-1/2 h-2 w-px -translate-x-1/2 bg-[#041007]/45"
+            style={{ top: tickTop }}
+          />
         </div>
       ))}
       <div
@@ -2923,7 +2919,10 @@ function ProbabilityWheel({ chance = 35, roll = null, size = 230, duration = 110
           <span className="h-2 w-[2px] rounded-full bg-[#f6fffb]/70" />
         </div>
       </div>
-      <div className="absolute inset-[42px] z-10 flex flex-col items-center justify-center overflow-hidden rounded-full text-center">
+      <div
+        className="absolute z-10 flex flex-col items-center justify-center overflow-hidden rounded-full text-center"
+        style={{ inset: innerInset }}
+      >
         <div className="pointer-events-none absolute inset-0 bg-grid-faint opacity-20" />
         {children || (
           <>

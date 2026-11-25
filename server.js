@@ -1895,6 +1895,8 @@ function publicGlyphDrop(user) {
         id: drop.id,
         currentDrop: { ...skin },
         rollId: drop.rollId || null,
+        failed: Boolean(drop.failed),
+        compensation: roundGold(Math.max(0, Number(drop.compensation) || 0)),
         net,
         netPercent: cardPrice > 0 ? roundGold((net / cardPrice) * 100) : 0,
       }
@@ -1909,7 +1911,7 @@ function publicGlyphDrop(user) {
     spent,
     cardPrice,
     count,
-    remaining: publicDrops.length,
+    remaining: publicDrops.filter((drop) => !drop.failed).length,
     attemptsLeft: Math.max(
       0,
       Math.min(
@@ -2760,8 +2762,11 @@ app.post('/api/glyph/collect', auth, (req, res) => {
     ? req.body.dropIds.map(String)
     : [String(req.body?.dropId || '')].filter(Boolean)
   const uniqueIds = [...new Set(rawIds)]
-  const selected = session.drops.filter((drop) => uniqueIds.includes(drop.id))
-  if (!selected.length) return sendError(res, 400, 'NO_DROP_SELECTED', 'Выбери хотя бы один дроп')
+  const selected = session.drops.filter((drop) => uniqueIds.includes(drop.id) && !drop.failed)
+  const hasFailed = session.drops.some((drop) => drop.failed)
+  if (!selected.length && !hasFailed) {
+    return sendError(res, 400, 'NO_DROP_SELECTED', 'Выбери хотя бы один дроп')
+  }
 
   const count = Math.max(1, Math.trunc(Number(session.count) || 1))
   const cardPrice = roundGold(Number(session.spent) / count)
@@ -2776,11 +2781,13 @@ app.post('/api/glyph/collect', auth, (req, res) => {
     collected.push({ ...skin, instanceId: entry.instanceId, obtainedAt: entry.obtainedAt })
     net = roundGold(net + (skin.price - cardPrice))
   }
-  session.drops = session.drops.filter((drop) => !uniqueIds.includes(drop.id))
+  session.drops = session.drops.filter(
+    (drop) => !drop.failed && !uniqueIds.includes(drop.id),
+  )
   if (!session.drops.length) user.glyphDrop = null
   saveState()
 
-  const remaining = user.glyphDrop?.drops?.length || 0
+  const remaining = user.glyphDrop?.drops?.filter((drop) => !drop.failed).length || 0
   return res.json({
     ok: true,
     glyphDrop: publicGlyphDrop(user),
@@ -2788,7 +2795,9 @@ app.post('/api/glyph/collect', auth, (req, res) => {
     wonItems: collected,
     user: publicUser(user),
     daily: buildDaily(),
-    message: `Забрано карт: ${collected.length} · ${net >= 0 ? 'окуп' : 'минус'} ${formatGold(Math.abs(net))}${remaining > 0 ? ` · осталось карт: ${remaining}` : ''}`,
+    message: collected.length
+      ? `Забрано карт: ${collected.length} · ${net >= 0 ? 'окуп' : 'минус'} ${formatGold(Math.abs(net))}${remaining > 0 ? ` · осталось карт: ${remaining}` : ''}`
+      : 'Сгоревшие карты убраны',
   })
 })
 
@@ -2800,8 +2809,11 @@ app.post('/api/glyph/sell', auth, (req, res) => {
     ? req.body.dropIds.map(String)
     : [String(req.body?.dropId || '')].filter(Boolean)
   const uniqueIds = [...new Set(rawIds)]
-  const selected = session.drops.filter((drop) => uniqueIds.includes(drop.id))
-  if (!selected.length) return sendError(res, 400, 'NO_DROP_SELECTED', 'Выбери хотя бы один дроп')
+  const selected = session.drops.filter((drop) => uniqueIds.includes(drop.id) && !drop.failed)
+  const hasFailed = session.drops.some((drop) => drop.failed)
+  if (!selected.length && !hasFailed) {
+    return sendError(res, 400, 'NO_DROP_SELECTED', 'Выбери хотя бы один дроп')
+  }
 
   const count = Math.max(1, Math.trunc(Number(session.count) || 1))
   const cardPrice = roundGold(Number(session.spent) / count)
@@ -2813,18 +2825,22 @@ app.post('/api/glyph/sell', auth, (req, res) => {
     net = roundGold(net + (skin.price - cardPrice))
   }
   user.balance = roundGold(user.balance + total)
-  session.drops = session.drops.filter((drop) => !uniqueIds.includes(drop.id))
+  session.drops = session.drops.filter(
+    (drop) => !drop.failed && !uniqueIds.includes(drop.id),
+  )
   if (!session.drops.length) user.glyphDrop = null
   saveState()
 
-  const remaining = user.glyphDrop?.drops?.length || 0
+  const remaining = user.glyphDrop?.drops?.filter((drop) => !drop.failed).length || 0
   return res.json({
     ok: true,
     glyphDrop: publicGlyphDrop(user),
     remaining,
     user: publicUser(user),
     daily: buildDaily(),
-    message: `Продано карт: ${selected.length} за ${formatGold(total)} · ${net >= 0 ? 'окуп' : 'минус'} ${formatGold(Math.abs(net))}${remaining > 0 ? ` · осталось карт: ${remaining}` : ''}`,
+    message: selected.length
+      ? `Продано карт: ${selected.length} за ${formatGold(total)} · ${net >= 0 ? 'окуп' : 'минус'} ${formatGold(Math.abs(net))}${remaining > 0 ? ` · осталось карт: ${remaining}` : ''}`
+      : 'Сгоревшие карты убраны',
   })
 })
 
@@ -2836,7 +2852,9 @@ app.post('/api/glyph/upgrade', auth, (req, res) => {
     ? req.body.dropIds.map(String)
     : [String(req.body?.dropId || '')].filter(Boolean)
   const uniqueIds = [...new Set(rawIds)]
-  const selected = session.drops.filter((drop) => uniqueIds.includes(drop.id))
+  const selected = session.drops.filter(
+    (drop) => uniqueIds.includes(drop.id) && !drop.failed,
+  )
   if (!selected.length) return sendError(res, 400, 'NO_DROP_SELECTED', 'Выбери хотя бы один дроп')
 
   const multiplier = Math.trunc(Number(req.body?.multiplier))
@@ -2844,66 +2862,72 @@ app.post('/api/glyph/upgrade', auth, (req, res) => {
     return sendError(res, 400, 'BAD_MULTIPLIER', 'Доступны апгрейды x2, x3, x5 и x10')
   }
 
-  const baseSkins = selected.map((drop) => SKIN_BY_ID.get(drop.currentDrop.id) || drop.currentDrop)
-  const baseTotal = roundGold(baseSkins.reduce((sum, skin) => sum + skin.price, 0))
-  const count = Math.max(1, Math.trunc(Number(session.count) || 1))
-  const cardPrice = roundGold(Number(session.spent) / count)
-  const cardCost = roundGold(cardPrice * selected.length)
-  const targetValue = Math.max(1, baseTotal * multiplier)
-  const targetSkin = weightedPickFrom(makeValuePool(targetValue))
   const chance = Math.round((GLYPH_UPGRADE_EDGE / multiplier) * 10) / 10
-  const roll = crypto.randomInt(0, 10000) / 100
-  const won = roll < chance
+  const results = []
+  let wins = 0
+  let losses = 0
+  let compensationTotal = 0
 
-  let compensation = 0
-  let wonItem = null
-  if (won) {
-    const entry = makeInventoryEntry(targetSkin)
-    user.inventory.unshift(entry)
-    wonItem = { ...targetSkin, instanceId: entry.instanceId, obtainedAt: entry.obtainedAt }
-    pushCaseHistory(
-      user,
-      { id: 'glyph-drop', name: `Глиф · ${session.deckName} · x${multiplier}` },
-      targetSkin,
-      entry.instanceId,
-    )
-    pushLiveDrop(user, targetSkin, 'upgrade')
-  } else {
-    compensation = roundGold(baseTotal * (0.05 + crypto.randomInt(0, 501) / 10000))
-    user.balance = roundGold(user.balance + compensation)
+  for (const drop of selected) {
+    const baseSkin = SKIN_BY_ID.get(drop.currentDrop.id) || drop.currentDrop
+    const roll = crypto.randomInt(0, 10000) / 100
+    const won = roll < chance
+    if (won) {
+      const targetValue = Math.max(1, baseSkin.price * multiplier)
+      const targetSkin = weightedPickFrom(makeValuePool(targetValue))
+      drop.currentDrop = { ...targetSkin }
+      drop.rollId = crypto.randomUUID()
+      drop.upgraded = true
+      drop.failed = false
+      delete drop.compensation
+      results.push({
+        dropId: drop.id,
+        won: true,
+        chance,
+        roll,
+        baseSkin: { ...baseSkin },
+        targetSkin: { ...targetSkin },
+        compensation: 0,
+      })
+      wins += 1
+    } else {
+      const compensation = roundGold(
+        baseSkin.price * (0.05 + crypto.randomInt(0, 501) / 10000),
+      )
+      user.balance = roundGold(user.balance + compensation)
+      drop.failed = true
+      drop.failedAt = new Date().toISOString()
+      drop.compensation = compensation
+      results.push({
+        dropId: drop.id,
+        won: false,
+        chance,
+        roll,
+        baseSkin: { ...baseSkin },
+        compensation,
+      })
+      losses += 1
+      compensationTotal = roundGold(compensationTotal + compensation)
+    }
   }
 
-  session.drops = session.drops.filter((drop) => !uniqueIds.includes(drop.id))
-  if (!session.drops.length) user.glyphDrop = null
-  const net = won
-    ? roundGold(targetSkin.price - cardCost)
-    : roundGold(compensation - cardCost)
   saveState()
 
-  const remaining = user.glyphDrop?.drops?.length || 0
+  const remaining = session.drops.filter((drop) => !drop.failed).length
   return res.json({
     ok: true,
-    won,
     multiplier,
     chance,
-    roll,
-    baseSkin: baseSkins[0] || null,
-    baseSkins,
-    baseTotal,
+    results,
+    wins,
+    losses,
+    compensationTotal,
     selectedCount: selected.length,
-    targetSkin,
-    targetValue: roundGold(targetValue),
-    wonItem,
-    compensation,
-    sessionSpent: cardCost,
-    net,
     glyphDrop: publicGlyphDrop(user),
     remaining,
     user: publicUser(user),
     daily: buildDaily(),
-    message: won
-      ? `x${multiplier} апгрейд успешен: ${targetSkin.name}${remaining > 0 ? ` · осталось карт: ${remaining}` : ''}`
-      : `x${multiplier} апгрейд не удался${compensation > 0 ? ` · компенсация +${formatGold(compensation)}` : ''}${remaining > 0 ? ` · осталось карт: ${remaining}` : ''}`,
+    message: `x${multiplier}: успешно ${wins} из ${selected.length}${compensationTotal > 0 ? ` · компенсация +${formatGold(compensationTotal)}` : ''}${remaining > 0 ? ` · осталось карт: ${remaining}` : ''}`,
   })
 })
 
