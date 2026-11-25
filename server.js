@@ -98,6 +98,38 @@ const BATTLE_ROUND_OPTIONS = [1, 3, 5]
 // Заявки: голда сверх дневного лимита и история заявок.
 const MAX_GOLD_REQUEST = Math.max(1000, Number(process.env.MAX_GOLD_REQUEST) || 100000)
 const APPLICATION_HISTORY_LIMIT = 500
+// Anti-DDoS: корреляция действий аккаунта с нескольких IP и блокировка IP.
+const SECURITY_WINDOW_MS =
+  Math.max(1, Number(process.env.SECURITY_WINDOW_MINUTES) || 10) * 60 * 1000
+const SECURITY_ACCOUNT_IP_LIMIT = Math.max(
+  3,
+  Number(process.env.SECURITY_ACCOUNT_IP_LIMIT) || 4,
+)
+const SECURITY_IP_VIOLATION_LIMIT = Math.max(
+  10,
+  Number(process.env.SECURITY_IP_VIOLATION_LIMIT) || 25,
+)
+const SECURITY_IP_BLOCK_MS =
+  Math.max(1, Number(process.env.SECURITY_IP_BLOCK_MINUTES) || 30) * 60 * 1000
+const SECURITY_VIOLATION_WINDOW_MS = 5 * 60 * 1000
+const SECURITY_SENSITIVE_PATHS = new Set([
+  '/api/open-case',
+  '/api/upgrade',
+  '/api/craft',
+  '/api/case-battle',
+  '/api/buy-skin',
+  '/api/sell-skin',
+  '/api/sell-many',
+  '/api/deposit',
+  '/api/promos',
+  '/api/promos/activate',
+  '/api/applications',
+])
+const RESERVED_USERNAMES = new Set(['player', 'admin', 'owner'])
+// Демо-аккаунт player выключен по умолчанию. Включается только явно.
+const ENABLE_PLAYER_DEMO = /^(1|true|yes)$/i.test(
+  String(process.env.ENABLE_PLAYER_DEMO || ''),
+)
 // Rate limit: не больше N операций в минуту с одного IP.
 const RATE_LIMIT_API_PER_MIN = Math.max(30, Number(process.env.RATE_LIMIT_API_PER_MIN) || 180)
 const RATE_LIMIT_AUTH_PER_MIN = Math.max(3, Number(process.env.RATE_LIMIT_AUTH_PER_MIN) || 10)
@@ -944,8 +976,10 @@ function defaultPromos() {
 
 function defaultState() {
   const users = {
-    player: makeSeedUser('player', PLAYER_PASSWORD, 'player', 100),
     owner: makeSeedUser('owner', OWNER_PASSWORD, 'owner', OWNER_START_BALANCE),
+  }
+  if (ENABLE_PLAYER_DEMO) {
+    users.player = makeSeedUser('player', PLAYER_PASSWORD, 'player', 100)
   }
   if (ENABLE_ADMIN_ACCOUNT) {
     users.admin = makeSeedUser('admin', ADMIN_PASSWORD, 'admin', ADMIN_START_BALANCE)
@@ -996,7 +1030,18 @@ function normalizeState(parsed) {
     }
   }
   if (!parsed || typeof parsed !== 'object' || !parsed.users) return defaultState()
-  if (!parsed.users.player) parsed.users.player = makeSeedUser('player', PLAYER_PASSWORD, 'player', 100)
+  if (!parsed.users.player && ENABLE_PLAYER_DEMO) {
+    parsed.users.player = makeSeedUser('player', PLAYER_PASSWORD, 'player', 100)
+  }
+  if (parsed.users.player) {
+    if (ENABLE_PLAYER_DEMO) {
+      parsed.users.player.disabled = false
+      delete parsed.users.player.disabledReason
+    } else {
+      parsed.users.player.disabled = true
+      parsed.users.player.disabledReason = 'Демо-доступ отключён'
+    }
+  }
   if (!parsed.users.owner) parsed.users.owner = makeSeedUser('owner', OWNER_PASSWORD, 'owner', OWNER_START_BALANCE)
   if (!parsed.users.admin && ENABLE_ADMIN_ACCOUNT) {
     parsed.users.admin = makeSeedUser('admin', ADMIN_PASSWORD, 'admin', ADMIN_START_BALANCE)
@@ -1149,6 +1194,150 @@ function verifyToken(token) {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/*  Anti-DDoS / suspicious activity                                   */
+/* ------------------------------------------------------------------ */
+
+const accountIpActivity = new Map()
+const ipViolations = new Map()
+const blockedIps = new Map()
+
+function maskIp(ip) {
+  if (!ip) return 'unknown'
+  if (ip.includes('.')) {
+    const parts = ip.split('.')
+    if (parts.length === 4) return `${parts[0]}.${parts[1]}.${parts[2]}.x`
+  }
+  return `${String(ip).slice(0, 12)}…`
+}
+
+function recordIpViolation(req, reason = 'rate_limit') {
+  const ip = rateLimitKey(req)
+  if (!ip || ip === 'unknown') return
+  const now = Date.now()
+  let entry = ipViolations.get(ip)
+  if (!entry || now - entry.firstAt > SECURITY_VIOLATION_WINDOW_MS) {
+    entry = { count: 0, firstAt: now, lastAt: now, reasons: new Set() }
+    ipViolations.set(ip, entry)
+  }
+  entry.count += 1
+  entry.lastAt = now
+  entry.reasons.add(reason)
+
+  if (entry.count >= SECURITY_IP_VIOLATION_LIMIT) {
+    blockedIps.set(ip, now + SECURITY_IP_BLOCK_MS)
+    ipViolations.delete(ip)
+    console.warn(
+      `[security] IP blocked for ${Math.round(SECURITY_IP_BLOCK_MS / 60000)} min: ${maskIp(ip)}`,
+    )
+    if (blockedIps.size > 5000) {
+      for (const [key, until] of blockedIps) {
+        if (until <= now) blockedIps.delete(key)
+      }
+    }
+  }
+
+  if (ipViolations.size > 20000) {
+    for (const [key, value] of ipViolations) {
+      if (now - value.lastAt > SECURITY_VIOLATION_WINDOW_MS) ipViolations.delete(key)
+    }
+    while (ipViolations.size > 20000) {
+      const oldest = ipViolations.keys().next().value
+      if (oldest === undefined) break
+      ipViolations.delete(oldest)
+    }
+  }
+}
+
+function isIpBlocked(ip) {
+  const until = blockedIps.get(ip)
+  if (!until) return 0
+  if (until <= Date.now()) {
+    blockedIps.delete(ip)
+    return 0
+  }
+  return until
+}
+
+function clearIpViolations(req) {
+  const ip = rateLimitKey(req)
+  if (ip) ipViolations.delete(ip)
+}
+
+function banAccount(user, reason, ips = []) {
+  if (!user || user.banned || user.role === 'owner') return
+  user.banned = true
+  user.bannedAt = new Date().toISOString()
+  user.banReason = reason
+  user.bannedIps = [...new Set(ips)].slice(0, 10)
+  accountIpActivity.delete(user.id)
+  saveState()
+  console.warn(`[security] account banned: ${user.username} — ${reason}`)
+}
+
+function trackAccountAction(user, req) {
+  if (!user || user.role === 'owner') return false
+  if (user.banned) return true
+
+  const pathOnly = String(req.originalUrl || '').split('?')[0]
+  if (req.method !== 'POST' || !SECURITY_SENSITIVE_PATHS.has(pathOnly)) return false
+
+  const ip = rateLimitKey(req)
+  if (!ip) return false
+  const now = Date.now()
+  let activity = accountIpActivity.get(user.id)
+  if (!activity) {
+    activity = new Map()
+    accountIpActivity.set(user.id, activity)
+  }
+  for (const [key, at] of activity) {
+    if (now - at > SECURITY_WINDOW_MS) activity.delete(key)
+  }
+  activity.set(ip, now)
+
+  if (activity.size >= SECURITY_ACCOUNT_IP_LIMIT) {
+    banAccount(
+      user,
+      `Действия с ${activity.size} IP за ${Math.round(SECURITY_WINDOW_MS / 60000)} мин`,
+      [...activity.keys()],
+    )
+    return true
+  }
+  return false
+}
+
+function publicSecurity() {
+  const now = Date.now()
+  const banned = Object.values(state.users)
+    .filter((user) => user.banned)
+    .slice(0, 100)
+    .map((user) => ({
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      bannedAt: user.bannedAt || null,
+      banReason: user.banReason || '',
+      bannedIps: (user.bannedIps || []).slice(0, 10),
+    }))
+
+  const activeBlocked = [...blockedIps.entries()].filter(([, until]) => until > now)
+  const blockedIpsList = activeBlocked
+    .slice(0, 20)
+    .map(([ip, until]) => ({ ip, until: new Date(until).toISOString() }))
+
+  return {
+    banned,
+    blockedCount: activeBlocked.length,
+    blockedIps: blockedIpsList,
+    limits: {
+      accountIpLimit: SECURITY_ACCOUNT_IP_LIMIT,
+      windowMinutes: Math.round(SECURITY_WINDOW_MS / 60000),
+      ipViolationLimit: SECURITY_IP_VIOLATION_LIMIT,
+      ipBlockMinutes: Math.round(SECURITY_IP_BLOCK_MS / 60000),
+    },
+  }
+}
+
 function auth(req, res, next) {
   const header = req.headers.authorization || ''
   const token = header.startsWith('Bearer ') ? header.slice(7) : ''
@@ -1156,6 +1345,30 @@ function auth(req, res, next) {
   const user = payload ? state.users[payload.uid] : null
   if (!user) {
     return res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Требуется авторизация' } })
+  }
+  if (user.disabled) {
+    return res.status(403).json({
+      error: {
+        code: 'ACCOUNT_DISABLED',
+        message: user.disabledReason || 'Аккаунт отключён',
+      },
+    })
+  }
+  if (user.banned) {
+    return res.status(403).json({
+      error: {
+        code: 'ACCOUNT_BANNED',
+        message: `Аккаунт заблокирован${user.banReason ? `: ${user.banReason}` : ''}`,
+      },
+    })
+  }
+  if (trackAccountAction(user, req)) {
+    return res.status(403).json({
+      error: {
+        code: 'ACCOUNT_BANNED',
+        message: 'Аккаунт заблокирован за подозрительную активность с нескольких IP',
+      },
+    })
   }
   req.user = user
   req.userId = user.id
@@ -1279,6 +1492,7 @@ function publicApplications(user) {
     pendingCount: pending.length,
     dailyRemaining: daily.remaining,
     maxGoldRequest: MAX_GOLD_REQUEST,
+    security: isOwner ? publicSecurity() : null,
     can: {
       admin: user.role === 'player' && !hasPending('admin'),
       gold: user.role === 'player' && daily.remaining <= 0 && !hasPending('gold'),
@@ -1754,6 +1968,7 @@ function createRateLimiter({ name, windowMs = 60_000, max }) {
     res.setHeader('X-RateLimit-Reset', String(Math.ceil(bucket.resetAt / 1000)))
 
     if (bucket.count > max) {
+      recordIpViolation(req, `${name}_limit`)
       const retryAfter = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000))
       res.setHeader('Retry-After', String(retryAfter))
       return res.status(429).json({
@@ -1775,6 +1990,23 @@ const registerRateLimiter = createRateLimiter({
   max: RATE_LIMIT_REGISTER_PER_MIN,
 })
 const actionRateLimiter = createRateLimiter({ name: 'action', max: RATE_LIMIT_ACTION_PER_MIN })
+
+// IP, который повторно нарушает лимиты или спамит, временно блокируется целиком.
+app.use((req, res, next) => {
+  const pathOnly = String(req.originalUrl || '').split('?')[0]
+  if (pathOnly === '/api/health') return next()
+  const ip = rateLimitKey(req)
+  const until = isIpBlocked(ip)
+  if (!until) return next()
+  const retryAfter = Math.max(1, Math.ceil((until - Date.now()) / 1000))
+  res.setHeader('Retry-After', String(retryAfter))
+  return res.status(429).json({
+    error: {
+      code: 'IP_BLOCKED',
+      message: `IP временно заблокирован. Попробуйте через ${retryAfter} сек.`,
+    },
+  })
+})
 
 // Общий лимит на все API-запросы, кроме health-check Render.
 app.use('/api', (req, res, next) => {
@@ -1884,7 +2116,7 @@ app.post('/api/register', (req, res) => {
   if (password.length > 128) {
     return sendError(res, 400, 'WEAK_PASSWORD', 'Пароль слишком длинный (максимум 128 символов)')
   }
-  if (state.users[username]) {
+  if (RESERVED_USERNAMES.has(username) || state.users[username]) {
     return sendError(res, 409, 'USERNAME_TAKEN', 'Этот логин уже занят')
   }
 
@@ -1909,6 +2141,7 @@ app.post('/api/register', (req, res) => {
   state.users[username] = user
   state.registrationIps[ipKey] = registrationCount(state.registrationIps, ipKey) + 1
   state.registrationDevices[deviceId] = registrationCount(state.registrationDevices, deviceId) + 1
+  clearIpViolations(req)
   saveState()
 
   const secure = process.env.NODE_ENV === 'production' ? '; Secure' : ''
@@ -1928,15 +2161,34 @@ app.post('/api/login', (req, res) => {
 
   const user = state.users[username]
   if (!user) {
+    recordIpViolation(req, 'auth_fail')
     return sendError(res, 401, 'INVALID_CREDENTIALS', 'Неверный логин или пароль')
+  }
+  if (user.disabled) {
+    return sendError(
+      res,
+      403,
+      'ACCOUNT_DISABLED',
+      user.disabledReason || 'Этот аккаунт отключён',
+    )
+  }
+  if (user.banned) {
+    return sendError(
+      res,
+      403,
+      'ACCOUNT_BANNED',
+      `Аккаунт заблокирован${user.banReason ? `: ${user.banReason}` : ''}`,
+    )
   }
 
   const expected = Buffer.from(hashPassword(password, user.salt), 'hex')
   const actual = Buffer.from(user.passwordHash, 'hex')
   if (expected.length !== actual.length || !crypto.timingSafeEqual(expected, actual)) {
+    recordIpViolation(req, 'auth_fail')
     return sendError(res, 401, 'INVALID_CREDENTIALS', 'Неверный логин или пароль')
   }
 
+  clearIpViolations(req)
   res.json(sessionPayload(user))
 })
 
@@ -2290,6 +2542,38 @@ app.post('/api/applications/:id/reject', auth, (req, res) => {
     application: publicApplication(application),
     applications: publicApplications(req.user),
     message: 'Заявка отклонена',
+  })
+})
+
+app.get('/api/admin/security', auth, (req, res) => {
+  if (req.user.role !== 'owner') {
+    return sendError(res, 403, 'FORBIDDEN', 'Доступно только владельцу')
+  }
+  res.json({ ok: true, security: publicSecurity() })
+})
+
+app.post('/api/admin/users/:id/unban', auth, (req, res) => {
+  if (req.user.role !== 'owner') {
+    return sendError(res, 403, 'FORBIDDEN', 'Разбанить может только владелец')
+  }
+  const target = state.users[req.params.id]
+  if (!target) return sendError(res, 404, 'USER_NOT_FOUND', 'Пользователь не найден')
+  if (!target.banned) {
+    return sendError(res, 400, 'NOT_BANNED', 'Этот аккаунт не заблокирован')
+  }
+
+  target.banned = false
+  delete target.bannedAt
+  delete target.banReason
+  delete target.bannedIps
+  accountIpActivity.delete(target.id)
+  saveState()
+
+  return res.json({
+    ok: true,
+    applications: publicApplications(req.user),
+    security: publicSecurity(),
+    message: `Аккаунт ${target.username} разбанен`,
   })
 })
 
@@ -2774,8 +3058,9 @@ saveState()
 app.listen(PORT, () => {
   console.log(`STAND GRADE API: http://localhost:${PORT}`)
   if (process.env.NODE_ENV !== 'production') {
+    const demoNote = ENABLE_PLAYER_DEMO ? ` · player/${PLAYER_PASSWORD}` : ''
     const adminNote = ENABLE_ADMIN_ACCOUNT ? ` · admin/${ADMIN_PASSWORD}` : ''
-    console.log(`Demo accounts: player/${PLAYER_PASSWORD}${adminNote}`)
+    console.log(`Local accounts:${demoNote}${adminNote}`)
   } else if (!process.env.SESSION_SECRET) {
     console.warn(
       'WARNING: задайте SESSION_SECRET в переменных окружения перед публичным деплоем',

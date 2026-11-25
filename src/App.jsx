@@ -5013,12 +5013,6 @@ function LoginScreen({ onLogin, onRegister, notice }) {
     }
   }
 
-  function fillDemo() {
-    setUsername('player')
-    setPassword('player')
-    setError('')
-  }
-
   function switchMode(next) {
     setMode(next)
     setConfirmPassword('')
@@ -5157,7 +5151,7 @@ function LoginScreen({ onLogin, onRegister, notice }) {
                       value={username}
                       onChange={(event) => setUsername(event.target.value)}
                       autoComplete="username"
-                      placeholder={isRegister ? 'my_login' : 'player'}
+                      placeholder="my_login"
                       className="h-11 w-full rounded-xl border border-white/[0.09] bg-black/25 pl-10 pr-3 text-[12px] font-semibold text-white placeholder:text-white/20 transition focus:border-acid/45 focus:bg-black/35 focus:outline-none"
                     />
                   </div>
@@ -5235,20 +5229,9 @@ function LoginScreen({ onLogin, onRegister, notice }) {
                   На одного человека можно создать не более 2 аккаунтов.
                 </div>
               ) : (
-                <div className="mt-5 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <div className="text-[8px] font-black uppercase tracking-[0.14em] text-white/26">Демо-доступ</div>
-                      <div className="mt-1 font-mono text-[10px] font-bold text-white/55">player / player</div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={fillDemo}
-                      className="rounded-lg border border-acid/18 bg-acid/[0.06] px-2.5 py-1.5 text-[8px] font-black uppercase tracking-[0.1em] text-acid transition hover:bg-acid/15"
-                    >
-                      Заполнить
-                    </button>
-                  </div>
+                <div className="mt-5 flex items-start gap-2 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-[9px] leading-relaxed text-white/35">
+                  <Icon name="info" size={13} className="mt-0.5 shrink-0 text-acid/60" />
+                  Нет аккаунта? Открой вкладку «Регистрация» и придумай свой логин и пароль.
                 </div>
               )}
 
@@ -6729,6 +6712,7 @@ function ApplicationsSection({ applications, user, token, onUpdate, onToast }) {
   const pendingAdmin = mine.find((item) => item.type === 'admin' && item.status === 'pending')
   const pendingGold = mine.find((item) => item.type === 'gold' && item.status === 'pending')
   const pendingPromo = mine.find((item) => item.type === 'promo' && item.status === 'pending')
+  const security = applications?.security || null
 
   async function submitApplication(type, payload = {}) {
     if (busy) return
@@ -6761,6 +6745,25 @@ function ApplicationsSection({ applications, user, token, onUpdate, onToast }) {
       })
       onUpdate({ applications: data.applications, promos: data.promos })
       onToast(data.message, 'success', action === 'approve' ? 'Заявка одобрена' : 'Заявка отклонена')
+    } catch (requestError) {
+      setError(requestError.message)
+      onToast(requestError.message, 'error')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  async function unbanUser(id) {
+    if (busy) return
+    setBusy(`unban:${id}`)
+    setError('')
+    try {
+      const data = await apiRequest(`/api/admin/users/${id}/unban`, {
+        method: 'POST',
+        token,
+      })
+      onUpdate({ applications: data.applications })
+      onToast(data.message, 'success', 'Аккаунт разбанен')
     } catch (requestError) {
       setError(requestError.message)
       onToast(requestError.message, 'error')
@@ -6947,6 +6950,69 @@ function ApplicationsSection({ applications, user, token, onUpdate, onToast }) {
               </div>
             )}
           </div>
+
+          {security && (
+            <div className="mt-3 overflow-hidden rounded-[22px] border border-[#ff5d7a]/15 bg-[#120d0f]/70">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] px-4 py-2.5">
+                <div className="flex items-center gap-2 text-[8px] font-black uppercase tracking-[0.14em] text-[#ff9aac]">
+                  <Icon name="shield" size={13} />
+                  Безопасность · анти-DDoS
+                </div>
+                <span className="text-[8px] font-semibold text-white/30">
+                  В бане: {security.banned?.length || 0} · IP в блоке: {security.blockedCount || 0}
+                </span>
+              </div>
+
+              {security.banned?.length ? (
+                <div className="divide-y divide-white/[0.05]">
+                  {security.banned.map((entry) => (
+                    <div key={entry.id} className="flex flex-wrap items-center gap-2 px-4 py-3">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#ff5d7a]/25 bg-[#ff5d7a]/[0.08] text-[#ff9aac]">
+                        <Icon name="user" size={13} />
+                      </span>
+                      <div className="min-w-0">
+                        <div className="text-[10px] font-extrabold text-white/80">{entry.username}</div>
+                        <div className="mt-0.5 text-[8px] font-semibold text-white/30">
+                          {entry.banReason || 'Подозрительная активность'}
+                        </div>
+                      </div>
+                      <span className="rounded-md border border-[#ff5d7a]/25 bg-[#ff5d7a]/[0.08] px-2 py-1 text-[7px] font-black uppercase tracking-[0.08em] text-[#ff9aac]">
+                        {entry.role === 'admin' ? 'ADMIN' : 'PLAYER'}
+                      </span>
+                      {(entry.bannedIps || []).length > 0 && (
+                        <span className="font-mono text-[7px] font-semibold text-white/25">
+                          {entry.bannedIps.join(', ')}
+                        </span>
+                      )}
+                      <span className="ml-auto text-[8px] font-semibold text-white/22">
+                        {entry.bannedAt ? formatWhen(entry.bannedAt) : '—'}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={Boolean(busy)}
+                        onClick={() => unbanUser(entry.id)}
+                        className="rounded-lg border border-acid/25 bg-acid/[0.07] px-2.5 py-1.5 text-[7px] font-black uppercase tracking-[0.08em] text-acid transition hover:bg-acid/[0.14] disabled:opacity-40"
+                      >
+                        {busy === `unban:${entry.id}` ? '...' : 'Разбанить'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="px-4 py-5 text-center text-[9px] font-semibold text-white/25">
+                  Заблокированных аккаунтов нет.
+                </div>
+              )}
+
+              {security.limits && (
+                <div className="border-t border-white/[0.05] px-4 py-2 text-[7px] font-semibold leading-relaxed text-white/22">
+                  Автобан: {security.limits.accountIpLimit}+ IP за {security.limits.windowMinutes} мин.
+                  IP-блок: {security.limits.ipViolationLimit} нарушений за 5 мин на{' '}
+                  {security.limits.ipBlockMinutes} мин.
+                </div>
+              )}
+            </div>
+          )}
         </>
       ) : (
         <div className="grid gap-3 lg:grid-cols-2">
@@ -7980,6 +8046,11 @@ export default function App() {
           setToken(null)
           setStatus(null)
           setNotice('Сессия истекла — войдите снова.')
+        } else if (error.status === 403) {
+          saveToken(null)
+          setToken(null)
+          setStatus(null)
+          setNotice(error.message)
         } else {
           pushToast(error.message, 'error')
         }
