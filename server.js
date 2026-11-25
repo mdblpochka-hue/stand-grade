@@ -95,6 +95,9 @@ const CRAFT_MIN_ITEMS = 3
 const CRAFT_MAX_ITEMS = 10
 const CRAFT_PROFIT_CHANCE = 1 / 3
 const BATTLE_ROUND_OPTIONS = [1, 3, 5]
+// Заявки: голда сверх дневного лимита и история заявок.
+const MAX_GOLD_REQUEST = Math.max(1000, Number(process.env.MAX_GOLD_REQUEST) || 100000)
+const APPLICATION_HISTORY_LIMIT = 500
 // Rate limit: не больше N операций в минуту с одного IP.
 const RATE_LIMIT_API_PER_MIN = Math.max(30, Number(process.env.RATE_LIMIT_API_PER_MIN) || 180)
 const RATE_LIMIT_AUTH_PER_MIN = Math.max(3, Number(process.env.RATE_LIMIT_AUTH_PER_MIN) || 10)
@@ -953,6 +956,7 @@ function defaultState() {
     dailyDistributed: 0,
     users,
     promos: defaultPromos(),
+    applications: [],
     registrationIps: {},
     registrationDevices: {},
   }
@@ -1001,6 +1005,10 @@ function normalizeState(parsed) {
   if (!ENABLE_ADMIN_ACCOUNT) delete parsed.users.admin
   Object.values(parsed.users).forEach(migrateUser)
   if (!Array.isArray(parsed.promos)) parsed.promos = defaultPromos()
+  if (!Array.isArray(parsed.applications)) parsed.applications = []
+  parsed.applications = parsed.applications
+    .filter((application) => application && typeof application === 'object' && application.id && application.type)
+    .slice(0, APPLICATION_HISTORY_LIMIT)
   if (!parsed.registrationIps || typeof parsed.registrationIps !== 'object') parsed.registrationIps = {}
   if (!parsed.registrationDevices || typeof parsed.registrationDevices !== 'object') {
     parsed.registrationDevices = {}
@@ -1216,9 +1224,138 @@ function publicPromos(user) {
   return {
     list,
     unseenCount: list.filter((promo) => new Date(promo.createdAt).getTime() > seenAt).length,
-    canCreate: user.role === 'owner' || user.role === 'admin',
+    canCreate: user.role === 'owner',
+    canRequest: user.role === 'admin',
     isOwner: user.role === 'owner',
   }
+}
+
+function publicApplication(application) {
+  return {
+    id: application.id,
+    type: application.type,
+    username: application.username,
+    status: application.status,
+    createdAt: application.createdAt,
+    reviewedAt: application.reviewedAt || null,
+    reviewedBy: application.reviewedBy || null,
+    message: application.message || '',
+    amount: application.amount || 0,
+    promo: application.promo ? { ...application.promo } : null,
+    result: application.result || null,
+    reviewNote: application.reviewNote || '',
+  }
+}
+
+function publicApplications(user) {
+  const mine = state.applications
+    .filter((application) => application.userId === user.id)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .map(publicApplication)
+
+  const isOwner = user.role === 'owner'
+  const pending = isOwner
+    ? state.applications
+        .filter((application) => application.status === 'pending')
+        .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+        .map(publicApplication)
+    : []
+  const history = isOwner
+    ? state.applications
+        .filter((application) => application.status !== 'pending')
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        .slice(0, 100)
+        .map(publicApplication)
+    : []
+
+  const hasPending = (type) =>
+    mine.some((application) => application.type === type && application.status === 'pending')
+  const daily = buildDaily()
+
+  return {
+    mine,
+    pending,
+    history,
+    pendingCount: pending.length,
+    dailyRemaining: daily.remaining,
+    maxGoldRequest: MAX_GOLD_REQUEST,
+    can: {
+      admin: user.role === 'player' && !hasPending('admin'),
+      gold: user.role === 'player' && daily.remaining <= 0 && !hasPending('gold'),
+      promo: user.role === 'admin' && !hasPending('promo'),
+    },
+  }
+}
+
+function pushApplication(application) {
+  state.applications.unshift(application)
+  if (state.applications.length > APPLICATION_HISTORY_LIMIT) {
+    state.applications.length = APPLICATION_HISTORY_LIMIT
+  }
+}
+
+function parsePromoRequest(body = {}) {
+  const type = body?.type === 'deposit_percent' ? 'deposit_percent' : 'gold'
+  let amount = 0
+  let percent = 0
+
+  if (type === 'gold') {
+    amount = Math.floor(Number(body?.amount))
+    if (!Number.isFinite(amount) || amount <= 0 || amount > PROMO_MAX_AMOUNT) {
+      return {
+        ok: false,
+        code: 'BAD_AMOUNT',
+        message: `Награда должна быть от 1 до ${formatGold(PROMO_MAX_AMOUNT)}`,
+      }
+    }
+  } else {
+    percent = Math.trunc(Number(body?.percent))
+    if (!Number.isFinite(percent) || percent < 1 || percent > PROMO_MAX_PERCENT) {
+      return {
+        ok: false,
+        code: 'BAD_PERCENT',
+        message: `Процент должен быть от 1 до ${PROMO_MAX_PERCENT}`,
+      }
+    }
+  }
+
+  const maxUses = Math.trunc(Number(body?.maxUses) || 100)
+  if (maxUses < 1 || maxUses > PROMO_MAX_USES) {
+    return {
+      ok: false,
+      code: 'BAD_USES',
+      message: `Количество активаций: от 1 до ${PROMO_MAX_USES}`,
+    }
+  }
+
+  const code = String(body?.code || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]/g, '')
+    .slice(0, 24)
+
+  return { ok: true, type, amount, percent, maxUses, code }
+}
+
+function createPromoFromRequest(input = {}, createdBy) {
+  let code = input.code
+  if (!code) {
+    const prefix = input.type === 'deposit_percent' ? 'BOOST' : 'WINTER'
+    code = `${prefix}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`
+  }
+  if (state.promos.some((promo) => promo.code === code)) {
+    return { ok: false, code: 'DUPLICATE_CODE', message: 'Такой промокод уже существует' }
+  }
+
+  const promo = makePromo(code, {
+    type: input.type,
+    amount: input.amount,
+    percent: input.percent,
+    maxUses: input.maxUses,
+    createdBy,
+  })
+  state.promos.unshift(promo)
+  return { ok: true, promo }
 }
 
 function hydrateInventoryItem(entry) {
@@ -1662,6 +1799,7 @@ app.use(
     '/api/sell-many',
     '/api/deposit',
     '/api/promos',
+    '/api/applications',
   ],
   actionRateLimiter,
 )
@@ -1691,6 +1829,7 @@ function sessionPayload(user) {
     feed: liveFeed,
     online: Math.max(1, onlineCount()),
     promos: publicPromos(user),
+    applications: publicApplications(user),
     event: winterEventInfo(),
   }
 }
@@ -1812,6 +1951,7 @@ app.get('/api/status', auth, (req, res) => {
     feed: liveFeed,
     online: Math.max(1, onlineCount()),
     promos: publicPromos(req.user),
+    applications: publicApplications(req.user),
     event: winterEventInfo(),
     serverTime: new Date().toISOString(),
   })
@@ -1955,6 +2095,205 @@ app.post('/api/sell-many', auth, (req, res) => {
 })
 
 /* ------------------------------------------------------------------ */
+/*  Applications (admin / gold / promo requests)                      */
+/* ------------------------------------------------------------------ */
+
+app.get('/api/applications', auth, (req, res) => {
+  res.json({ ok: true, applications: publicApplications(req.user) })
+})
+
+app.post('/api/applications', auth, (req, res) => {
+  const user = req.user
+  const type = String(req.body?.type || '')
+  if (!['admin', 'gold', 'promo'].includes(type)) {
+    return sendError(res, 400, 'BAD_TYPE', 'Неизвестный тип заявки')
+  }
+
+  const mine = state.applications.filter((application) => application.userId === user.id)
+  const hasPending = (applicationType) =>
+    mine.some(
+      (application) =>
+        application.type === applicationType && application.status === 'pending',
+    )
+
+  const base = {
+    id: crypto.randomUUID(),
+    type,
+    userId: user.id,
+    username: user.username,
+    status: 'pending',
+    createdAt: new Date().toISOString(),
+  }
+
+  if (type === 'admin') {
+    if (user.role !== 'player') {
+      return sendError(res, 403, 'ALREADY_STAFF', 'Админка уже доступна или вы владелец')
+    }
+    if (hasPending('admin')) {
+      return sendError(res, 409, 'APPLICATION_PENDING', 'У вас уже есть активная заявка на админку')
+    }
+    const message = String(req.body?.message || '').trim().slice(0, 300)
+    pushApplication({ ...base, message })
+    saveState()
+    return res.status(201).json({
+      ok: true,
+      applications: publicApplications(user),
+      message: 'Заявка на админку отправлена владельцу',
+    })
+  }
+
+  if (type === 'gold') {
+    if (user.role !== 'player') {
+      return sendError(res, 403, 'ONLY_PLAYERS', 'Заявки на голду доступны только игрокам')
+    }
+    const daily = buildDaily()
+    if (daily.remaining > 0) {
+      return sendError(
+        res,
+        400,
+        'DAILY_LIMIT_NOT_REACHED',
+        `Дневной лимит ещё не исчерпан: осталось ${formatGold(daily.remaining)}`,
+      )
+    }
+    if (hasPending('gold')) {
+      return sendError(res, 409, 'APPLICATION_PENDING', 'У вас уже есть активная заявка на голду')
+    }
+    const amount = Math.floor(Number(req.body?.amount))
+    if (!Number.isFinite(amount) || amount < 1 || amount > MAX_GOLD_REQUEST) {
+      return sendError(
+        res,
+        400,
+        'BAD_AMOUNT',
+        `Сумма заявки: от 1 до ${formatGold(MAX_GOLD_REQUEST)}`,
+      )
+    }
+    pushApplication({ ...base, amount })
+    saveState()
+    return res.status(201).json({
+      ok: true,
+      applications: publicApplications(user),
+      message: `Заявка на ${formatGold(amount)} отправлена владельцу`,
+    })
+  }
+
+  // promo
+  if (user.role !== 'admin') {
+    return sendError(res, 403, 'ONLY_ADMIN', 'Заявки на промокод доступны только администраторам')
+  }
+  if (hasPending('promo')) {
+    return sendError(res, 409, 'APPLICATION_PENDING', 'У вас уже есть активная заявка на промокод')
+  }
+
+  const parsed = parsePromoRequest(req.body?.promo || req.body)
+  if (!parsed.ok) return sendError(res, 400, parsed.code, parsed.message)
+  if (parsed.code && state.promos.some((promo) => promo.code === parsed.code)) {
+    return sendError(res, 409, 'DUPLICATE_CODE', 'Такой промокод уже существует')
+  }
+
+  pushApplication({
+    ...base,
+    promo: {
+      type: parsed.type,
+      amount: parsed.amount,
+      percent: parsed.percent,
+      maxUses: parsed.maxUses,
+      code: parsed.code,
+    },
+  })
+  saveState()
+  return res.status(201).json({
+    ok: true,
+    applications: publicApplications(user),
+    message: 'Заявка на создание промокода отправлена владельцу',
+  })
+})
+
+app.post('/api/applications/:id/approve', auth, (req, res) => {
+  if (req.user.role !== 'owner') {
+    return sendError(res, 403, 'FORBIDDEN', 'Одобрять заявки может только владелец')
+  }
+
+  const application = state.applications.find((item) => item.id === req.params.id)
+  if (!application) return sendError(res, 404, 'APPLICATION_NOT_FOUND', 'Заявка не найдена')
+  if (application.status !== 'pending') {
+    return sendError(res, 409, 'ALREADY_REVIEWED', 'Заявка уже обработана')
+  }
+
+  const target = state.users[application.userId]
+  if (!target) return sendError(res, 404, 'USER_NOT_FOUND', 'Пользователь не найден')
+
+  let message = ''
+
+  if (application.type === 'admin') {
+    if (target.role === 'owner') {
+      return sendError(res, 400, 'BAD_TARGET', 'Нельзя менять роль владельца')
+    }
+    target.role = 'admin'
+    application.result = { role: 'admin' }
+    message = `Пользователь ${target.username} получил админку`
+  } else if (application.type === 'gold') {
+    const amount = roundGold(Math.max(0, Number(application.amount) || 0))
+    target.balance = roundGold(target.balance + amount)
+    application.result = { amount, balance: target.balance }
+    message = `Выдано ${formatGold(amount)} игроку ${target.username}`
+  } else if (application.type === 'promo') {
+    if (!application.promo) {
+      return sendError(res, 400, 'BAD_APPLICATION', 'В заявке нет данных промокода')
+    }
+    const created = createPromoFromRequest(application.promo, req.user.username)
+    if (!created.ok) return sendError(res, 409, created.code, created.message)
+    application.result = {
+      promoId: created.promo.id,
+      promoCode: created.promo.code,
+    }
+    message =
+      created.promo.type === 'deposit_percent'
+        ? `Промокод ${created.promo.code} создан: +${created.promo.percent}% к пополнению`
+        : `Промокод ${created.promo.code} создан на ${formatGold(created.promo.amount)}`
+  } else {
+    return sendError(res, 400, 'BAD_TYPE', 'Неизвестный тип заявки')
+  }
+
+  application.status = 'approved'
+  application.reviewedAt = new Date().toISOString()
+  application.reviewedBy = req.user.username
+  saveState()
+
+  return res.json({
+    ok: true,
+    application: publicApplication(application),
+    applications: publicApplications(req.user),
+    promos: publicPromos(req.user),
+    message,
+  })
+})
+
+app.post('/api/applications/:id/reject', auth, (req, res) => {
+  if (req.user.role !== 'owner') {
+    return sendError(res, 403, 'FORBIDDEN', 'Отклонять заявки может только владелец')
+  }
+
+  const application = state.applications.find((item) => item.id === req.params.id)
+  if (!application) return sendError(res, 404, 'APPLICATION_NOT_FOUND', 'Заявка не найдена')
+  if (application.status !== 'pending') {
+    return sendError(res, 409, 'ALREADY_REVIEWED', 'Заявка уже обработана')
+  }
+
+  application.status = 'rejected'
+  application.reviewedAt = new Date().toISOString()
+  application.reviewedBy = req.user.username
+  application.reviewNote = String(req.body?.reason || '').trim().slice(0, 200)
+  saveState()
+
+  return res.json({
+    ok: true,
+    application: publicApplication(application),
+    applications: publicApplications(req.user),
+    message: 'Заявка отклонена',
+  })
+})
+
+/* ------------------------------------------------------------------ */
 /*  Promo codes                                                       */
 /* ------------------------------------------------------------------ */
 
@@ -1970,56 +2309,25 @@ app.post('/api/promos/seen', auth, (req, res) => {
 
 app.post('/api/promos', auth, (req, res) => {
   const user = req.user
-  if (user.role !== 'owner' && user.role !== 'admin') {
-    return sendError(res, 403, 'FORBIDDEN', 'Создавать промокоды может только владелец проекта')
+  if (user.role !== 'owner') {
+    return sendError(
+      res,
+      403,
+      'FORBIDDEN',
+      'Создавать промокоды напрямую может только владелец. Админ может отправить заявку.',
+    )
   }
 
-  const type = req.body?.type === 'deposit_percent' ? 'deposit_percent' : 'gold'
-  let amount = 0
-  let percent = 0
+  const parsed = parsePromoRequest(req.body)
+  if (!parsed.ok) return sendError(res, 400, parsed.code, parsed.message)
 
-  if (type === 'gold') {
-    amount = Math.floor(Number(req.body?.amount))
-    if (!Number.isFinite(amount) || amount <= 0 || amount > PROMO_MAX_AMOUNT) {
-      return sendError(res, 400, 'BAD_AMOUNT', `Награда должна быть от 1 до ${formatGold(PROMO_MAX_AMOUNT)}`)
-    }
-  } else {
-    percent = Math.trunc(Number(req.body?.percent))
-    if (!Number.isFinite(percent) || percent < 1 || percent > PROMO_MAX_PERCENT) {
-      return sendError(res, 400, 'BAD_PERCENT', `Процент должен быть от 1 до ${PROMO_MAX_PERCENT}`)
-    }
-  }
+  const created = createPromoFromRequest(parsed, user.username)
+  if (!created.ok) return sendError(res, 400, created.code, created.message)
 
-  const maxUses = Math.trunc(Number(req.body?.maxUses) || 100)
-  if (maxUses < 1 || maxUses > PROMO_MAX_USES) {
-    return sendError(res, 400, 'BAD_USES', `Количество активаций: от 1 до ${PROMO_MAX_USES}`)
-  }
-
-  let code = String(req.body?.code || '')
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9_-]/g, '')
-    .slice(0, 24)
-  if (!code) {
-    const prefix = type === 'deposit_percent' ? 'BOOST' : 'WINTER'
-    code = `${prefix}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`
-  }
-
-  if (state.promos.some((promo) => promo.code === code)) {
-    return sendError(res, 400, 'DUPLICATE_CODE', 'Такой промокод уже существует')
-  }
-
-  const promo = makePromo(code, {
-    type,
-    amount,
-    percent,
-    maxUses,
-    createdBy: user.username,
-  })
-  state.promos.unshift(promo)
   user.promoSeenAt = new Date().toISOString()
   saveState()
 
+  const { promo } = created
   res.json({
     ok: true,
     promo: {
@@ -2031,9 +2339,9 @@ app.post('/api/promos', auth, (req, res) => {
     },
     promos: publicPromos(user),
     message:
-      type === 'deposit_percent'
-        ? `Промокод ${code} создан: +${percent}% к пополнению`
-        : `Промокод ${code} создан на ${formatGold(amount)}`,
+      promo.type === 'deposit_percent'
+        ? `Промокод ${promo.code} создан: +${promo.percent}% к пополнению`
+        : `Промокод ${promo.code} создан на ${formatGold(promo.amount)}`,
   })
 })
 

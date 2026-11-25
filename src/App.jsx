@@ -341,6 +341,12 @@ const ICONS = {
       <path d="M14 5v14" strokeDasharray="2 3" />
     </>
   ),
+  inbox: (
+    <>
+      <path d="M4 4h16l2 9v5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-5l2-9Z" />
+      <path d="M2 13h5l2 3h6l2-3h5" />
+    </>
+  ),
   snowflake: (
     <>
       <path d="M12 2v20M4.2 6.5l15.6 11M19.8 6.5 4.2 17.5" />
@@ -1039,10 +1045,11 @@ const NAV_ITEMS = [
   { id: 'craft', label: 'Крафт', icon: 'sparkles' },
   { id: 'battle', label: 'Битва', icon: 'flame' },
   { id: 'promos', label: 'Промокоды', icon: 'ticket' },
+  { id: 'requests', label: 'Заявки', icon: 'inbox' },
   { id: 'inventory', label: 'Инвентарь', icon: 'archive' },
 ]
 
-const SECTION_IDS = ['cases', 'craft', 'battle', 'upgrade', 'promos', 'inventory', 'settings']
+const SECTION_IDS = ['cases', 'craft', 'battle', 'upgrade', 'promos', 'requests', 'inventory', 'settings']
 
 function readSectionFromHash() {
   if (typeof window === 'undefined') return 'cases'
@@ -1055,6 +1062,7 @@ function Header({
   online,
   soundOn,
   promoBadge = 0,
+  requestBadge = 0,
   activeSection = 'cases',
   onNavigate,
   onStore,
@@ -1118,6 +1126,11 @@ function Header({
               {item.id === 'promos' && promoBadge > 0 && (
                 <span className="promo-badge flex h-4 min-w-4 items-center justify-center rounded-full bg-[#ffcf4d] px-1 text-[9px] font-black text-[#241a00]">
                   !
+                </span>
+              )}
+              {item.id === 'requests' && requestBadge > 0 && (
+                <span className="promo-badge flex h-4 min-w-4 items-center justify-center rounded-full bg-[#7bdcff] px-1 text-[9px] font-black text-[#041007]">
+                  {requestBadge > 9 ? '9+' : requestBadge}
                 </span>
               )}
               <span className="nav-tip" aria-hidden="true">
@@ -1272,6 +1285,22 @@ function Header({
                     </div>
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    onNavigate('requests')
+                  }}
+                  className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] font-bold text-white/60 transition hover:bg-white/[0.05] hover:text-white"
+                >
+                  <Icon name="inbox" size={14} />
+                  Заявки
+                  {requestBadge > 0 && (
+                    <span className="ml-auto rounded-full bg-[#7bdcff] px-1.5 py-0.5 text-[8px] font-black text-[#041007]">
+                      {requestBadge > 9 ? '9+' : requestBadge}
+                    </span>
+                  )}
+                </button>
                 <button
                   type="button"
                   onClick={() => {
@@ -2963,7 +2992,7 @@ function WinterEventBar({ event, onNavigate }) {
   )
 }
 
-function PromoSection({ promos, user, token, event, onUpdate, onToast }) {
+function PromoSection({ promos, user, token, event, onUpdate, onToast, onNavigate }) {
   const [code, setCode] = useState('')
   const [activating, setActivating] = useState(false)
   const [newCode, setNewCode] = useState('')
@@ -3139,12 +3168,18 @@ function PromoSection({ promos, user, token, event, onUpdate, onToast }) {
           <div className="relative flex items-center justify-between gap-2">
             <div>
               <div className="text-[10px] font-black uppercase tracking-[0.14em] text-white/70">
-                {promos?.canCreate ? 'Создание промокода' : 'Активные промокоды'}
+                {promos?.canCreate
+                  ? 'Создание промокода'
+                  : promos?.canRequest
+                    ? 'Промокод через заявку'
+                    : 'Активные промокоды'}
               </div>
               <div className="text-[8px] font-semibold text-white/30">
                 {promos?.canCreate
-                  ? 'Доступно владельцу проекта и администратору'
-                  : 'Коды можно активировать в поле слева'}
+                  ? 'Доступно только владельцу проекта'
+                  : promos?.canRequest
+                    ? 'Админ отправляет заявку, владелец одобряет'
+                    : 'Коды можно активировать в поле слева'}
               </div>
             </div>
             <Icon name="crown" size={18} className="text-[#ffcf4d]/60" />
@@ -3220,6 +3255,22 @@ function PromoSection({ promos, user, token, event, onUpdate, onToast }) {
                 </button>
               </div>
             </form>
+          )}
+
+          {promos?.canRequest && (
+            <div className="relative mt-3 rounded-xl border border-[#ffcf4d]/18 bg-[#ffcf4d]/[0.05] p-3">
+              <div className="text-[9px] font-bold leading-relaxed text-[#ffe6a3]/85">
+                Админ не создаёт промокоды напрямую. Отправь заявку — владелец одобрит, и код появится
+                в списке.
+              </div>
+              <button
+                type="button"
+                onClick={() => onNavigate?.('requests')}
+                className="mt-2 w-full rounded-lg border border-[#ffcf4d]/35 bg-[#ffcf4d]/12 px-3 py-2 text-[8px] font-black uppercase tracking-[0.1em] text-[#ffe6a3] transition hover:bg-[#ffcf4d]/20"
+              >
+                Перейти к заявке
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -6598,6 +6649,626 @@ function SettingToggle({ icon, title, description, active, onToggle }) {
   )
 }
 
+const APPLICATION_TYPE_META = {
+  admin: { label: 'Админка', icon: 'shield', color: '#7bdcff' },
+  gold: { label: 'Голда', icon: 'coin', color: '#35ff87' },
+  promo: { label: 'Промокод', icon: 'ticket', color: '#ffcf4d' },
+}
+
+const APPLICATION_STATUS_META = {
+  pending: {
+    label: 'На рассмотрении',
+    className: 'border-[#ffcf4d]/25 bg-[#ffcf4d]/[0.08] text-[#ffe6a3]',
+  },
+  approved: {
+    label: 'Одобрена',
+    className: 'border-acid/25 bg-acid/[0.08] text-acid',
+  },
+  rejected: {
+    label: 'Отклонена',
+    className: 'border-[#ff5d7a]/25 bg-[#ff5d7a]/[0.08] text-[#ff9aac]',
+  },
+}
+
+function ApplicationStatus({ status }) {
+  const meta = APPLICATION_STATUS_META[status] || APPLICATION_STATUS_META.pending
+  return (
+    <span
+      className={cx(
+        'rounded-md border px-2 py-1 text-[7px] font-black uppercase tracking-[0.08em]',
+        meta.className,
+      )}
+    >
+      {meta.label}
+    </span>
+  )
+}
+
+function ApplicationPromoDetails({ promo }) {
+  if (!promo) return null
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+      <span className="rounded-md border border-[#ffcf4d]/25 bg-[#ffcf4d]/[0.07] px-2 py-1 text-[8px] font-extrabold tabular-nums text-[#ffe6a3]">
+        {promo.type === 'deposit_percent'
+          ? `+${promo.percent}% к пополнению`
+          : `+${formatGold(promo.amount)}`}
+      </span>
+      <span className="rounded-md border border-white/[0.08] bg-white/[0.03] px-2 py-1 text-[8px] font-bold text-white/45">
+        активаций: {promo.maxUses}
+      </span>
+      {promo.code && (
+        <span className="rounded-md border border-white/[0.1] bg-black/25 px-2 py-1 font-mono text-[8px] font-bold tracking-[0.06em] text-white/70">
+          {promo.code}
+        </span>
+      )}
+    </div>
+  )
+}
+
+function ApplicationsSection({ applications, user, token, onUpdate, onToast }) {
+  const [busy, setBusy] = useState('')
+  const [error, setError] = useState('')
+  const [adminMessage, setAdminMessage] = useState('')
+  const [goldAmount, setGoldAmount] = useState('15000')
+  const [promoType, setPromoType] = useState('gold')
+  const [promoCode, setPromoCode] = useState('')
+  const [promoAmount, setPromoAmount] = useState('1000')
+  const [promoPercent, setPromoPercent] = useState('10')
+  const [promoMaxUses, setPromoMaxUses] = useState('100')
+
+  const isOwner = user.role === 'owner'
+  const isAdmin = user.role === 'admin'
+  const isPlayer = user.role === 'player'
+  const mine = applications?.mine || []
+  const pending = applications?.pending || []
+  const history = applications?.history || []
+  const dailyRemaining = Number(
+    applications?.dailyRemaining ?? user.dailyLimit?.remaining ?? 0,
+  )
+  const maxGoldRequest = Number(applications?.maxGoldRequest) || 100000
+  const pendingAdmin = mine.find((item) => item.type === 'admin' && item.status === 'pending')
+  const pendingGold = mine.find((item) => item.type === 'gold' && item.status === 'pending')
+  const pendingPromo = mine.find((item) => item.type === 'promo' && item.status === 'pending')
+
+  async function submitApplication(type, payload = {}) {
+    if (busy) return
+    setBusy(type)
+    setError('')
+    try {
+      const data = await apiRequest('/api/applications', {
+        method: 'POST',
+        token,
+        body: { type, ...payload },
+      })
+      onUpdate({ applications: data.applications })
+      onToast(data.message, 'success', 'Заявка отправлена')
+    } catch (requestError) {
+      setError(requestError.message)
+      onToast(requestError.message, 'error')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  async function reviewApplication(id, action) {
+    if (busy) return
+    setBusy(`${id}:${action}`)
+    setError('')
+    try {
+      const data = await apiRequest(`/api/applications/${id}/${action}`, {
+        method: 'POST',
+        token,
+      })
+      onUpdate({ applications: data.applications, promos: data.promos })
+      onToast(data.message, 'success', action === 'approve' ? 'Заявка одобрена' : 'Заявка отклонена')
+    } catch (requestError) {
+      setError(requestError.message)
+      onToast(requestError.message, 'error')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const pendingCounts = pending.reduce((acc, item) => {
+    acc[item.type] = (acc[item.type] || 0) + 1
+    return acc
+  }, {})
+
+  return (
+    <section id="requests" className="pt-10 sm:pt-14">
+      <SectionHeading
+        eyebrow="REQUESTS"
+        title="Центр заявок"
+        description={
+          isOwner
+            ? 'Заявки на админку, голду и промокоды. Одобряй или отклоняй — изменения сразу применяются.'
+            : isAdmin
+              ? 'Отправь владельцу заявку на создание промокода и следи за статусом.'
+              : 'Заявка на админку и запрос голды после исчерпания дневного лимита — всё здесь.'
+        }
+      />
+
+      {error && (
+        <div className="mb-3 flex items-start gap-2 rounded-xl border border-[#ff7189]/20 bg-[#ff7189]/[0.06] p-3 text-[9px] leading-relaxed text-[#ff9aac]">
+          <Icon name="alert" size={13} className="mt-0.5 shrink-0" />
+          {error}
+        </div>
+      )}
+
+      {isOwner ? (
+        <>
+          <div className="mb-3 grid grid-cols-3 gap-2">
+            {[
+              ['admin', 'Админка'],
+              ['gold', 'Голда'],
+              ['promo', 'Промокоды'],
+            ].map(([type, label]) => (
+              <div
+                key={type}
+                className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-3"
+              >
+                <div className="text-[8px] font-black uppercase tracking-[0.12em] text-white/30">
+                  {label}
+                </div>
+                <div className="mt-1 font-display text-[20px] font-black text-white">
+                  {pendingCounts[type] || 0}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="overflow-hidden rounded-[22px] border border-white/[0.08] bg-[linear-gradient(155deg,#0e1714,#090d0b)]">
+            <div className="flex items-center justify-between gap-2 border-b border-white/[0.06] px-4 py-3">
+              <div className="text-[9px] font-black uppercase tracking-[0.14em] text-white/50">
+                Ожидают решения · {pending.length}
+              </div>
+              <span className="text-[8px] font-semibold text-white/25">
+                Одобрение сразу меняет роль, баланс или создаёт промокод
+              </span>
+            </div>
+
+            {pending.length ? (
+              <div className="grid gap-3 p-3 lg:grid-cols-2">
+                {pending.map((application) => {
+                  const meta = APPLICATION_TYPE_META[application.type]
+                  return (
+                    <div
+                      key={application.id}
+                      className="rounded-2xl border border-white/[0.08] bg-black/20 p-4"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex min-w-0 items-center gap-2.5">
+                          <span
+                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border"
+                            style={{
+                              borderColor: `${meta.color}33`,
+                              backgroundColor: `${meta.color}12`,
+                              color: meta.color,
+                            }}
+                          >
+                            <Icon name={meta.icon} size={17} />
+                          </span>
+                          <div className="min-w-0">
+                            <div className="text-[8px] font-black uppercase tracking-[0.14em] text-white/35">
+                              {meta.label}
+                            </div>
+                            <div className="mt-0.5 truncate text-[12px] font-extrabold text-white">
+                              {application.username}
+                            </div>
+                            <div className="mt-0.5 text-[8px] font-semibold text-white/25">
+                              {formatWhen(application.createdAt)}
+                            </div>
+                          </div>
+                        </div>
+                        <ApplicationStatus status={application.status} />
+                      </div>
+
+                      {application.type === 'admin' && application.message && (
+                        <p className="mt-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-2.5 text-[9px] leading-relaxed text-white/45">
+                          {application.message}
+                        </p>
+                      )}
+
+                      {application.type === 'gold' && (
+                        <div className="mt-3 rounded-xl border border-acid/15 bg-acid/[0.05] p-2.5 text-[11px] font-extrabold tabular-nums text-acid">
+                          Запрос: +{formatGold(application.amount)}
+                        </div>
+                      )}
+
+                      {application.type === 'promo' && (
+                        <ApplicationPromoDetails promo={application.promo} />
+                      )}
+
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          type="button"
+                          disabled={Boolean(busy)}
+                          onClick={() => reviewApplication(application.id, 'approve')}
+                          className="flex-1 rounded-lg border border-acid/30 bg-acid/[0.09] px-3 py-2 text-[8px] font-black uppercase tracking-[0.1em] text-acid transition hover:bg-acid/[0.16] disabled:opacity-40"
+                        >
+                          {busy === `${application.id}:approve` ? 'Применяем...' : 'Одобрить'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={Boolean(busy)}
+                          onClick={() => reviewApplication(application.id, 'reject')}
+                          className="rounded-lg border border-[#ff5d7a]/25 bg-[#ff5d7a]/[0.06] px-3 py-2 text-[8px] font-black uppercase tracking-[0.1em] text-[#ff9aac] transition hover:bg-[#ff5d7a]/[0.12] disabled:opacity-40"
+                        >
+                          Отклонить
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="px-4 py-10 text-center text-[10px] font-semibold text-white/30">
+                Новых заявок нет. Как только кто-то отправит — появится здесь.
+              </div>
+            )}
+          </div>
+
+          <div className="mt-3 overflow-hidden rounded-[22px] border border-white/[0.07] bg-white/[0.018]">
+            <div className="border-b border-white/[0.06] px-4 py-2.5 text-[8px] font-black uppercase tracking-[0.14em] text-white/35">
+              История решений · {history.length}
+            </div>
+            {history.length ? (
+              <div className="divide-y divide-white/[0.05]">
+                {history.slice(0, 30).map((application) => {
+                  const meta = APPLICATION_TYPE_META[application.type]
+                  return (
+                    <div key={application.id} className="flex flex-wrap items-center gap-2 px-4 py-2.5">
+                      <span style={{ color: meta.color }}>
+                        <Icon name={meta.icon} size={13} />
+                      </span>
+                      <span className="text-[10px] font-bold text-white/70">{application.username}</span>
+                      <span className="text-[8px] font-semibold text-white/28">{meta.label}</span>
+                      <ApplicationStatus status={application.status} />
+                      {application.result?.amount ? (
+                        <span className="text-[8px] font-bold tabular-nums text-acid">
+                          +{formatGold(application.result.amount)}
+                        </span>
+                      ) : null}
+                      {application.result?.promoCode ? (
+                        <span className="font-mono text-[8px] font-bold text-[#ffe6a3]">
+                          {application.result.promoCode}
+                        </span>
+                      ) : null}
+                      <span className="ml-auto text-[8px] font-semibold text-white/25">
+                        {formatWhen(application.reviewedAt || application.createdAt)}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="px-4 py-6 text-center text-[9px] font-semibold text-white/25">
+                Решений пока нет.
+              </div>
+            )}
+          </div>
+        </>
+      ) : (
+        <div className="grid gap-3 lg:grid-cols-2">
+          {isPlayer && (
+            <div className="relative overflow-hidden rounded-[22px] border border-white/[0.08] bg-[linear-gradient(155deg,#0e1714,#090d0b)] p-4 sm:p-5">
+              <div className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full bg-[#7bdcff]/10 blur-3xl" />
+              <div className="relative flex items-center gap-2">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#7bdcff]/25 bg-[#7bdcff]/[0.08] text-[#7bdcff]">
+                  <Icon name="shield" size={16} />
+                </span>
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-[0.14em] text-white/70">
+                    Заявка на админку
+                  </div>
+                  <div className="text-[8px] font-semibold text-white/30">
+                    Владелец рассмотрит и выдаст роль вручную
+                  </div>
+                </div>
+              </div>
+
+              {pendingAdmin ? (
+                <div className="relative mt-3 rounded-xl border border-[#ffcf4d]/20 bg-[#ffcf4d]/[0.06] p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[9px] font-bold text-[#ffe6a3]">
+                      Заявка уже отправлена
+                    </span>
+                    <ApplicationStatus status={pendingAdmin.status} />
+                  </div>
+                  <div className="mt-1 text-[8px] font-semibold text-white/30">
+                    {formatWhen(pendingAdmin.createdAt)}
+                  </div>
+                </div>
+              ) : applications?.can?.admin ? (
+                <>
+                  <textarea
+                    value={adminMessage}
+                    onChange={(event) => setAdminMessage(event.target.value)}
+                    maxLength={300}
+                    rows={3}
+                    placeholder="Почему вам нужна админка? Пара предложений."
+                    className="relative mt-3 w-full resize-none rounded-xl border border-white/[0.09] bg-black/30 px-3 py-2.5 text-[10px] font-semibold text-white placeholder:text-white/20 focus:border-[#7bdcff]/40 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    disabled={busy === 'admin'}
+                    onClick={() => submitApplication('admin', { message: adminMessage })}
+                    className="relative mt-2 w-full rounded-xl border border-[#7bdcff]/30 bg-[#7bdcff]/[0.09] px-4 py-2.5 text-[9px] font-black uppercase tracking-[0.1em] text-[#bfe9ff] transition hover:bg-[#7bdcff]/[0.16] disabled:opacity-40"
+                  >
+                    {busy === 'admin' ? 'Отправляем...' : 'Отправить заявку'}
+                  </button>
+                </>
+              ) : (
+                <div className="relative mt-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-[9px] leading-relaxed text-white/35">
+                  {user.role === 'admin'
+                    ? 'У вас уже есть админка.'
+                    : 'Заявка недоступна: вы уже отправили её или у вас другая роль.'}
+                </div>
+              )}
+            </div>
+          )}
+
+          {isPlayer && (
+            <div className="relative overflow-hidden rounded-[22px] border border-white/[0.08] bg-[linear-gradient(155deg,#14110b,#0a0d09)] p-4 sm:p-5">
+              <div className="pointer-events-none absolute -left-16 -top-16 h-44 w-44 rounded-full bg-acid/10 blur-3xl" />
+              <div className="relative flex items-center gap-2">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-acid/25 bg-acid/[0.08] text-acid">
+                  <Icon name="coin" size={16} />
+                </span>
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-[0.14em] text-white/70">
+                    Заявка на голду
+                  </div>
+                  <div className="text-[8px] font-semibold text-white/30">
+                    Доступна после исчерпания дневного лимита
+                  </div>
+                </div>
+              </div>
+
+              {pendingGold ? (
+                <div className="relative mt-3 rounded-xl border border-[#ffcf4d]/20 bg-[#ffcf4d]/[0.06] p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[9px] font-bold text-[#ffe6a3]">
+                      Запрос на {formatGold(pendingGold.amount)} отправлен
+                    </span>
+                    <ApplicationStatus status={pendingGold.status} />
+                  </div>
+                  <div className="mt-1 text-[8px] font-semibold text-white/30">
+                    {formatWhen(pendingGold.createdAt)}
+                  </div>
+                </div>
+              ) : dailyRemaining > 0 ? (
+                <div className="relative mt-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-[9px] leading-relaxed text-white/35">
+                  Дневной лимит ещё не исчерпан. Осталось{' '}
+                  <span className="font-bold text-white/60">{formatGold(dailyRemaining)}</span>.
+                  Заявка станет доступна, когда лимит закончится.
+                </div>
+              ) : applications?.can?.gold ? (
+                <>
+                  <label className="relative mt-3 block">
+                    <span className="mb-1 block text-[7px] font-black uppercase tracking-[0.12em] text-white/28">
+                      Сколько голды нужно
+                    </span>
+                    <input
+                      value={goldAmount}
+                      onChange={(event) => setGoldAmount(event.target.value.replace(/[^0-9]/g, ''))}
+                      inputMode="numeric"
+                      placeholder="15000"
+                      className="h-10 w-full rounded-xl border border-white/[0.09] bg-black/30 px-3 text-[11px] font-bold tabular-nums text-white focus:border-acid/40 focus:outline-none"
+                    />
+                  </label>
+                  <div className="relative mt-1 text-[8px] font-semibold text-white/25">
+                    Максимум за одну заявку: {formatGold(maxGoldRequest)}
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy === 'gold'}
+                    onClick={() => submitApplication('gold', { amount: Number(goldAmount) })}
+                    className="relative mt-2 w-full rounded-xl border border-acid/30 bg-acid/[0.09] px-4 py-2.5 text-[9px] font-black uppercase tracking-[0.1em] text-acid transition hover:bg-acid/[0.16] disabled:opacity-40"
+                  >
+                    {busy === 'gold' ? 'Отправляем...' : 'Отправить заявку'}
+                  </button>
+                </>
+              ) : (
+                <div className="relative mt-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-[9px] leading-relaxed text-white/35">
+                  У вас уже есть активная заявка на голду.
+                </div>
+              )}
+            </div>
+          )}
+
+          {isAdmin && (
+            <div className="relative overflow-hidden rounded-[22px] border border-white/[0.08] bg-[linear-gradient(155deg,#14110b,#0a0d09)] p-4 sm:p-5 lg:col-span-2">
+              <div className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full bg-[#ffcf4d]/10 blur-3xl" />
+              <div className="relative flex items-center gap-2">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#ffcf4d]/25 bg-[#ffcf4d]/[0.08] text-[#ffcf4d]">
+                  <Icon name="ticket" size={16} />
+                </span>
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-[0.14em] text-white/70">
+                    Заявка на создание промокода
+                  </div>
+                  <div className="text-[8px] font-semibold text-white/30">
+                    Уходит владельцу. После одобрения промокод появится автоматически
+                  </div>
+                </div>
+              </div>
+
+              {pendingPromo ? (
+                <div className="relative mt-3 rounded-xl border border-[#ffcf4d]/20 bg-[#ffcf4d]/[0.06] p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[9px] font-bold text-[#ffe6a3]">
+                      Заявка на промокод уже отправлена
+                    </span>
+                    <ApplicationStatus status={pendingPromo.status} />
+                  </div>
+                  <ApplicationPromoDetails promo={pendingPromo.promo} />
+                </div>
+              ) : applications?.can?.promo ? (
+                <div className="relative mt-3 space-y-2">
+                  <div className="grid grid-cols-2 gap-2 rounded-xl border border-white/[0.06] bg-black/20 p-1">
+                    {[
+                      ['gold', 'Голда'],
+                      ['deposit_percent', '% к пополнению'],
+                    ].map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setPromoType(value)}
+                        className={cx(
+                          'rounded-lg px-2 py-1.5 text-[8px] font-black uppercase tracking-[0.08em] transition',
+                          promoType === value
+                            ? 'bg-[#ffcf4d] text-[#241a00]'
+                            : 'text-white/35 hover:bg-white/[0.05] hover:text-white/65',
+                        )}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="block">
+                      <span className="mb-1 block text-[7px] font-black uppercase tracking-[0.12em] text-white/28">
+                        Код (пусто = авто)
+                      </span>
+                      <input
+                        value={promoCode}
+                        onChange={(event) => setPromoCode(event.target.value.toUpperCase())}
+                        placeholder={promoType === 'deposit_percent' ? 'BOOST10' : 'WINTER2026'}
+                        maxLength={24}
+                        className="h-9 w-full rounded-lg border border-white/[0.09] bg-black/30 px-2.5 text-[10px] font-bold uppercase tracking-[0.06em] text-white placeholder:text-white/20 focus:border-[#ffcf4d]/40 focus:outline-none"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-[7px] font-black uppercase tracking-[0.12em] text-white/28">
+                        {promoType === 'deposit_percent' ? 'Процент, %' : 'Награда, G'}
+                      </span>
+                      <input
+                        value={promoType === 'deposit_percent' ? promoPercent : promoAmount}
+                        onChange={(event) => {
+                          const value = event.target.value
+                            .replace(/[^0-9]/g, '')
+                            .slice(0, promoType === 'deposit_percent' ? 3 : 7)
+                          if (promoType === 'deposit_percent') setPromoPercent(value)
+                          else setPromoAmount(value)
+                        }}
+                        inputMode="numeric"
+                        placeholder={promoType === 'deposit_percent' ? '10' : '1000'}
+                        className="h-9 w-full rounded-lg border border-white/[0.09] bg-black/30 px-2.5 text-[10px] font-bold tabular-nums text-white placeholder:text-white/20 focus:border-[#ffcf4d]/40 focus:outline-none"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="flex items-end gap-2">
+                    <label className="block w-28">
+                      <span className="mb-1 block text-[7px] font-black uppercase tracking-[0.12em] text-white/28">
+                        Активаций
+                      </span>
+                      <input
+                        value={promoMaxUses}
+                        onChange={(event) =>
+                          setPromoMaxUses(event.target.value.replace(/[^0-9]/g, ''))
+                        }
+                        inputMode="numeric"
+                        className="h-9 w-full rounded-lg border border-white/[0.09] bg-black/30 px-2.5 text-[10px] font-bold tabular-nums text-white focus:border-[#ffcf4d]/40 focus:outline-none"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      disabled={busy === 'promo'}
+                      onClick={() =>
+                        submitApplication('promo', {
+                          promo: {
+                            type: promoType,
+                            amount: Number(promoAmount) || 0,
+                            percent: Number(promoPercent) || 0,
+                            maxUses: Number(promoMaxUses) || 0,
+                            code: promoCode.trim() || undefined,
+                          },
+                        })
+                      }
+                      className="h-9 flex-1 rounded-lg border border-[#ffcf4d]/35 bg-[#ffcf4d]/12 text-[9px] font-black uppercase tracking-[0.08em] text-[#ffe6a3] transition hover:bg-[#ffcf4d]/20 disabled:opacity-40"
+                    >
+                      {busy === 'promo' ? 'Отправляем...' : 'Отправить заявку'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="relative mt-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-[9px] leading-relaxed text-white/35">
+                  У вас уже есть активная заявка на промокод.
+                </div>
+              )}
+            </div>
+          )}
+
+          {!isPlayer && !isAdmin && (
+            <div className="rounded-[22px] border border-white/[0.08] bg-white/[0.02] p-4 text-[10px] text-white/35 lg:col-span-2">
+              Для вашей роли заявки не требуются.
+            </div>
+          )}
+        </div>
+      )}
+
+      {!isOwner && (
+        <div className="mt-3 overflow-hidden rounded-[22px] border border-white/[0.07] bg-white/[0.018]">
+          <div className="border-b border-white/[0.06] px-4 py-2.5 text-[8px] font-black uppercase tracking-[0.14em] text-white/35">
+            Мои заявки · {mine.length}
+          </div>
+          {mine.length ? (
+            <div className="divide-y divide-white/[0.05]">
+              {mine.slice(0, 30).map((application) => {
+                const meta = APPLICATION_TYPE_META[application.type]
+                return (
+                  <div key={application.id} className="flex flex-wrap items-center gap-2 px-4 py-2.5">
+                    <span style={{ color: meta.color }}>
+                      <Icon name={meta.icon} size={13} />
+                    </span>
+                    <span className="text-[10px] font-bold text-white/70">{meta.label}</span>
+                    <ApplicationStatus status={application.status} />
+                    {application.type === 'gold' && (
+                      <span className="text-[8px] font-bold tabular-nums text-white/45">
+                        {formatGold(application.amount)}
+                      </span>
+                    )}
+                    {application.type === 'promo' && application.promo && (
+                      <span className="font-mono text-[8px] font-bold text-[#ffe6a3]">
+                        {application.promo.code || 'авто'}
+                      </span>
+                    )}
+                    {application.result?.promoCode && (
+                      <span className="font-mono text-[8px] font-bold text-acid">
+                        {application.result.promoCode}
+                      </span>
+                    )}
+                    {application.result?.amount ? (
+                      <span className="text-[8px] font-bold tabular-nums text-acid">
+                        +{formatGold(application.result.amount)}
+                      </span>
+                    ) : null}
+                    {application.status === 'rejected' && application.reviewNote && (
+                      <span className="text-[8px] font-semibold text-[#ff9aac]/70">
+                        {application.reviewNote}
+                      </span>
+                    )}
+                    <span className="ml-auto text-[8px] font-semibold text-white/25">
+                      {formatWhen(application.reviewedAt || application.createdAt)}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="px-4 py-6 text-center text-[9px] font-semibold text-white/25">
+              Вы ещё не отправляли заявки.
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
 function SettingsSection({ user, soundOn, fast, onToggleSound, onToggleFast, onLogout, onStore }) {
   const roleLabel =
     user.role === 'owner'
@@ -7380,6 +8051,7 @@ export default function App() {
         daily: data.daily || previous.daily,
         feed,
         promos: data.promos || previous.promos,
+        applications: data.applications || previous.applications,
         event: data.event || previous.event,
       }
     })
@@ -7402,6 +8074,7 @@ export default function App() {
       feed: data.feed || [],
       online: data.online || 1,
       promos: data.promos,
+      applications: data.applications,
       event: data.event,
     })
     if (Number.isFinite(Number(data.online))) setOnline(Number(data.online))
@@ -7544,6 +8217,8 @@ export default function App() {
   const daily = status.daily
   const cases = status.cases || []
   const catalog = status.catalog || []
+  const requestBadge =
+    user.role === 'owner' ? Number(status.applications?.pendingCount) || 0 : 0
 
   return (
     <div key={user.id} className="relative min-h-screen overflow-x-hidden">
@@ -7565,6 +8240,7 @@ export default function App() {
         online={online}
         soundOn={soundOn}
         promoBadge={unseenPromos}
+        requestBadge={requestBadge}
         activeSection={activeSection}
         onNavigate={navigate}
         onStore={goStore}
@@ -7617,6 +8293,17 @@ export default function App() {
               user={user}
               token={token}
               event={status.event}
+              onUpdate={applyUpdate}
+              onToast={pushToast}
+              onNavigate={navigate}
+            />
+          )}
+
+          {activeSection === 'requests' && (
+            <ApplicationsSection
+              applications={status.applications}
+              user={user}
+              token={token}
               onUpdate={applyUpdate}
               onToast={pushToast}
             />
