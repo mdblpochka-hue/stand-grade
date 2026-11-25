@@ -7355,6 +7355,17 @@ function SettingsSection({ user, soundOn, fast, onToggleSound, onToggleFast, onL
               active={fast}
               onToggle={onToggleFast}
             />
+            <button
+              type="button"
+              onClick={() => {
+                unlockAudio()
+                playCoin()
+              }}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.025] px-3 py-2.5 text-[8px] font-black uppercase tracking-[0.1em] text-white/45 transition hover:border-acid/25 hover:text-acid"
+            >
+              <Icon name="volume" size={13} />
+              Проверить звук
+            </button>
           </div>
 
           <div className="relative mt-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-[8px] leading-relaxed text-white/27">
@@ -7920,6 +7931,18 @@ export default function App() {
   const toastIdRef = useRef(0)
   const lastUnseenRef = useRef(0)
   const now = useNow()
+
+  // Разблокируем Web Audio на первом же жесте пользователя.
+  // Иначе первый звук после async-запроса может остаться в suspended-контексте.
+  useEffect(() => {
+    const unlock = () => unlockAudio()
+    window.addEventListener('pointerdown', unlock, { once: true, capture: true })
+    window.addEventListener('keydown', unlock, { once: true, capture: true })
+    return () => {
+      window.removeEventListener('pointerdown', unlock, { capture: true })
+      window.removeEventListener('keydown', unlock, { capture: true })
+    }
+  }, [])
 
   const pushToast = useCallback((message, type = 'success', title) => {
     const id = ++toastIdRef.current
