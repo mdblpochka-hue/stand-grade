@@ -63,6 +63,7 @@ fs.mkdirSync(DATA_DIR, { recursive: true })
 // Пароли демо-аккаунтов можно переопределить переменными окружения.
 const PLAYER_PASSWORD = process.env.PLAYER_PASSWORD || 'player'
 const OWNER_PASSWORD = process.env.OWNER_PASSWORD || 'owner12'
+const OWNER_PASSWORD_RESET = String(process.env.OWNER_PASSWORD_RESET || '').trim()
 const OWNER_START_BALANCE = Number(process.env.OWNER_START_BALANCE || 500000)
 // Скрытый admin удалён. Вернуть его можно флагом ENABLE_ADMIN_ACCOUNT=true.
 const ENABLE_ADMIN_ACCOUNT = /^(1|true|yes)$/i.test(
@@ -927,6 +928,33 @@ function roundGold(value) {
 
 function hashPassword(password, salt) {
   return crypto.scryptSync(password, salt, 64).toString('hex')
+}
+
+// One-time reset of the owner password from env. The value itself is never stored,
+// only a short hash marker, so leaving the env in place does not reset it again.
+function applyOwnerPasswordReset() {
+  if (!OWNER_PASSWORD_RESET) return
+  if (OWNER_PASSWORD_RESET.length < 8) {
+    console.warn('OWNER_PASSWORD_RESET is shorter than 8 characters — reset skipped')
+    return
+  }
+  const marker = crypto
+    .createHash('sha256')
+    .update(OWNER_PASSWORD_RESET)
+    .digest('hex')
+    .slice(0, 16)
+  if (state.ownerPasswordResetHash === marker) return
+
+  const owner = state.users?.owner
+  if (!owner) return
+
+  const salt = crypto.randomBytes(16).toString('hex')
+  owner.salt = salt
+  owner.passwordHash = hashPassword(OWNER_PASSWORD_RESET, salt)
+  owner.passwordChangedAt = new Date().toISOString()
+  owner.tokenVersion = Math.max(0, Math.trunc(Number(owner.tokenVersion) || 0)) + 1
+  state.ownerPasswordResetHash = marker
+  console.log('Owner password reset applied from OWNER_PASSWORD_RESET')
 }
 
 function emptyHistory() {
@@ -3108,6 +3136,7 @@ function formatGold(value) {
   return `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(value || 0)} G`
 }
 
+applyOwnerPasswordReset()
 ensureDay()
 saveState()
 
