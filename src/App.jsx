@@ -2154,6 +2154,12 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
     }
   }
 
+  function prepareUpgrade(multiplier) {
+    if (!session || upgradeBusy || !revealed) return
+    setUpgradeMultiplier(multiplier)
+    setUpgradeError('')
+  }
+
   async function runUpgrade(multiplier) {
     if (!session || upgradeBusy || actionRef.current) return
     actionRef.current = true
@@ -2536,23 +2542,67 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                       <span className="text-[7px] font-black uppercase tracking-[0.14em] text-white/30">Кинуть в апгрейд</span>
                       <span className="text-[7px] font-semibold text-white/22">скин уйдёт в апгрейд</span>
                     </div>
-                    <div className="mt-1.5 grid grid-cols-4 gap-1.5">
-                      {[2, 3, 5, 10].map((multiplier) => {
-                        const chance = Math.round((90 / multiplier) * 10) / 10
-                        return (
+                    {upgradeMultiplier ? (
+                      <div className="mt-1.5 rounded-xl border border-[#b58bff]/30 bg-[#b58bff]/[0.08] p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="text-[7px] font-black uppercase tracking-[0.12em] text-[#d7c4ff]/60">
+                              Подтверждение
+                            </div>
+                            <div className="mt-0.5 text-[12px] font-black text-[#d7c4ff]">
+                              Апгрейд x{upgradeMultiplier}
+                            </div>
+                            <div className="mt-1 text-[8px] font-semibold text-white/35">
+                              Шанс {Math.round((90 / upgradeMultiplier) * 10) / 10}% · цель подберётся автоматически
+                            </div>
+                          </div>
                           <button
-                            key={multiplier}
                             type="button"
-                            onClick={() => runUpgrade(multiplier)}
-                            disabled={upgradeBusy || !revealed}
-                            className="rounded-lg border border-[#b58bff]/25 bg-[#b58bff]/[0.07] px-1 py-2 text-center transition hover:bg-[#b58bff]/[0.14] disabled:opacity-40"
+                            onClick={() => setUpgradeMultiplier(null)}
+                            disabled={upgradeBusy}
+                            className="rounded-md border border-white/[0.09] px-2 py-1 text-[7px] font-black uppercase tracking-[0.06em] text-white/40 transition hover:border-white/20 hover:text-white disabled:opacity-30"
                           >
-                            <div className="text-[11px] font-black text-[#d7c4ff]">x{multiplier}</div>
-                            <div className="text-[6.5px] font-bold text-white/30">{chance}%</div>
+                            Отмена
                           </button>
-                        )
-                      })}
-                    </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => runUpgrade(upgradeMultiplier)}
+                          disabled={upgradeBusy}
+                          className="btn-acid mt-2 w-full !py-2.5 !text-[9px] uppercase tracking-[0.08em] disabled:opacity-40"
+                        >
+                          {upgradeBusy ? (
+                            <>
+                              <span className="spin-ring h-3.5 w-3.5 rounded-full border-2 border-[#041007]/30 border-t-[#041007]" />
+                              Апгрейдим...
+                            </>
+                          ) : (
+                            'Апгрейд'
+                          )}
+                        </button>
+                        <div className="mt-1.5 text-center text-[7px] font-semibold text-white/22">
+                          Текущий дроп сгорит при провале
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-1.5 grid grid-cols-4 gap-1.5">
+                        {[2, 3, 5, 10].map((multiplier) => {
+                          const chance = Math.round((90 / multiplier) * 10) / 10
+                          return (
+                            <button
+                              key={multiplier}
+                              type="button"
+                              onClick={() => prepareUpgrade(multiplier)}
+                              disabled={upgradeBusy || !revealed}
+                              className="rounded-lg border border-[#b58bff]/25 bg-[#b58bff]/[0.07] px-1 py-2 text-center transition hover:bg-[#b58bff]/[0.14] disabled:opacity-40"
+                            >
+                              <div className="text-[11px] font-black text-[#d7c4ff]">x{multiplier}</div>
+                              <div className="text-[6.5px] font-bold text-white/30">{chance}%</div>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
                     {upgradeError && (
                       <div className="mt-2 text-[8px] font-semibold text-[#ff9aac]">{upgradeError}</div>
                     )}
