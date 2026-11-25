@@ -576,6 +576,43 @@ select:focus-visible {
   font-size: 13.5px !important;
 }
 
+@keyframes reactor-pull {
+  0% {
+    transform: translate(var(--rx, 0), var(--ry, 0)) scale(1);
+    opacity: 0.95;
+  }
+  65% {
+    opacity: 0.75;
+  }
+  100% {
+    transform: translate(0, 0) scale(0.12);
+    opacity: 0;
+  }
+}
+
+.reactor-pull {
+  animation: reactor-pull 620ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes reactor-attempt-pulse {
+  0% {
+    transform: scale(1);
+    color: #ffffff;
+  }
+  35% {
+    transform: scale(1.16);
+    color: #35ff87;
+  }
+  100% {
+    transform: scale(1);
+    color: #ffffff;
+  }
+}
+
+.reactor-attempt-pulse {
+  animation: reactor-attempt-pulse 420ms ease-out;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
