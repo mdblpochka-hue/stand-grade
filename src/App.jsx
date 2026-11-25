@@ -2384,7 +2384,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                     <ProbabilityWheel
                       chance={upgradeResult.chance}
                       roll={upgradeResult.roll}
-                      size={210}
+                      size={230}
                       duration={upgradeDuration}
                       spinKey={upgradeResult.roll}
                     >
@@ -2592,9 +2592,10 @@ function ProbabilityWheel({ chance = 35, roll = null, size = 230, duration = 110
     node.style.transition = 'none'
     node.style.transform = 'rotate(0deg)'
     void node.offsetWidth
+    const spins = duration <= 600 ? 2 : 6
     const frame = requestAnimationFrame(() => {
-      node.style.transition = `transform ${duration}ms cubic-bezier(.16,.84,.24,1)`
-      node.style.transform = `rotate(${360 * 4 + Number(roll) * 3.6}deg)`
+      node.style.transition = `transform ${duration}ms ${REEL_EASING}`
+      node.style.transform = `rotate(${360 * spins + Number(roll) * 3.6}deg)`
     })
     return () => cancelAnimationFrame(frame)
   }, [roll, duration, spinKey])
