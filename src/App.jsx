@@ -1976,6 +1976,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   const session = user.glyphDrop || null
   const [activeDeckId, setActiveDeckId] = useState(null)
   const [modalOpen, setModalOpen] = useState(false)
+  const [deckPreview, setDeckPreview] = useState(false)
   const [openCount, setOpenCount] = useState(1)
   const [revealed, setRevealed] = useState(false)
   const [busy, setBusy] = useState('')
@@ -2030,6 +2031,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   function closeModal() {
     if (upgradeResult && !upgradeRevealed) return
     setModalOpen(false)
+    setDeckPreview(false)
     setUpgradeResult(null)
     setUpgradeMultiplier(null)
     setUpgradeRevealed(false)
@@ -2054,7 +2056,9 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
     if (!deck || actionRef.current || busy) return
     const totalPrice = deck.price * openCount
     if (user.balance + 1e-9 < totalPrice) {
-      onToast(`Недостаточно G: нужно ${formatPrice(totalPrice)}`, 'error')
+      const message = `Недостаточно G: нужно ${formatPrice(totalPrice)}`
+      setError(message)
+      onToast(message, 'error')
       return
     }
     actionRef.current = true
@@ -2070,6 +2074,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       onUpdate(data)
       setActiveDeckId(deck.id)
       setModalOpen(true)
+      setDeckPreview(false)
       setRevealed(false)
       setUpgradeResult(null)
       setUpgradeMultiplier(null)
@@ -2088,16 +2093,27 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
     if (session) {
       setActiveDeckId(session.deckId)
       setModalOpen(true)
+      setDeckPreview(false)
       setRevealed(true)
       return
     }
-    startDeck(deck)
+    setActiveDeckId(deck.id)
+    setOpenCount(1)
+    setDeckPreview(true)
+    setModalOpen(true)
+    setRevealed(false)
+    setUpgradeResult(null)
+    setUpgradeMultiplier(null)
+    setUpgradeRevealed(false)
+    setUpgradeError('')
+    setError('')
   }
 
   function continueDrop() {
     if (!session) return
     setActiveDeckId(session.deckId)
     setModalOpen(true)
+    setDeckPreview(false)
     setRevealed(true)
     setUpgradeResult(null)
     setUpgradeMultiplier(null)
@@ -2262,38 +2278,11 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
         </div>
       )}
 
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/[0.07] bg-white/[0.02] px-3 py-2">
-        <div>
-          <div className="text-[8px] font-black uppercase tracking-[0.14em] text-white/35">Открыть за раз</div>
-          <div className="mt-0.5 text-[7px] font-semibold text-white/22">
-            5 перекрутов на каждую карту
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-1">
-          {[1, 2, 3, 5, 10].map((count) => (
-            <button
-              key={count}
-              type="button"
-              onClick={() => setOpenCount(count)}
-              disabled={Boolean(session)}
-              className={cx(
-                'h-8 min-w-[34px] rounded-lg border text-[9px] font-black tabular-nums transition disabled:opacity-35',
-                openCount === count
-                  ? 'border-acid/40 bg-acid/[0.1] text-acid'
-                  : 'border-white/[0.08] text-white/40 hover:border-acid/25 hover:text-acid',
-              )}
-            >
-              {count}
-            </button>
-          ))}
-        </div>
-      </div>
-
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {glyphs.map((deck, index) => {
           const top = deck.featuredSkin || deck.topPrize || deck.contents?.[0]
           const meta = top ? RARITY[top.rarity] || RARITY.Common : RARITY.Common
-          const displayPrice = deck.price * (session ? 1 : openCount)
+          const displayPrice = deck.price
           return (
             <article
               key={deck.id}
@@ -2318,7 +2307,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                 </div>
                 <div className="absolute right-4 top-4 z-10 text-right">
                   <div className="text-[7px] font-bold uppercase tracking-[0.14em] text-white/25">
-                    Печать{session ? '' : openCount > 1 ? ` ×${openCount}` : ''}
+                    Печать
                   </div>
                   <div className="mt-0.5 text-[13px] font-extrabold tabular-nums text-white">
                     {formatPrice(displayPrice)}
@@ -2417,7 +2406,114 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
             </div>
 
             <div className="relative p-4">
-              {upgradeResult ? (
+              {deckPreview ? (
+                (() => {
+                  const top = activeDeck.featuredSkin || activeDeck.topPrize || activeDeck.contents?.[0]
+                  const meta = top ? RARITY[top.rarity] || RARITY.Common : RARITY.Common
+                  const total = activeDeck.price * openCount
+                  return (
+                    <div>
+                      <div className="flex justify-center">
+                        <GlyphCardBack deck={activeDeck} className="h-[220px] w-[165px]" />
+                      </div>
+
+                      <div className="mt-3 rounded-xl border border-white/[0.07] bg-black/20 p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <div className="text-[8px] font-black uppercase tracking-[0.14em] text-white/30">
+                              5 перекрутов на карту
+                            </div>
+                            <div className="mt-0.5 text-[8px] font-semibold text-white/28">
+                              Сначала дроп, потом собери, продай или отправь в апгрейд
+                            </div>
+                          </div>
+                          <div className="shrink-0 text-right">
+                            <div className="text-[7px] font-black uppercase tracking-[0.1em] text-white/25">Топ</div>
+                            <div className="mt-0.5 max-w-[150px] truncate text-[9px] font-extrabold" style={{ color: meta.color }}>
+                              {top?.name || '—'}
+                            </div>
+                            <div className="text-[8px] font-extrabold tabular-nums text-white/38">
+                              {top ? formatPrice(top.price) : '—'}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-2 flex h-1.5 gap-[2px] overflow-hidden rounded-full bg-white/[0.04]">
+                          {(activeDeck.rarityBreakdown || []).map((row) => (
+                            <div
+                              key={row.rarity}
+                              title={`${row.rarity}: ${formatChance(row.chance)}`}
+                              className="h-full rounded-full"
+                              style={{
+                                width: `${row.chance}%`,
+                                minWidth: row.chance > 0 ? '2px' : 0,
+                                backgroundColor: (RARITY[row.rarity] || RARITY.Common).color,
+                              }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="mt-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[8px] font-black uppercase tracking-[0.14em] text-white/35">
+                            Сколько открыть
+                          </span>
+                          <span className="text-[9px] font-extrabold tabular-nums text-acid">
+                            Итого {formatPrice(total)}
+                          </span>
+                        </div>
+                        <div className="mt-1.5 grid grid-cols-5 gap-1.5">
+                          {[1, 2, 3, 5, 10].map((count) => (
+                            <button
+                              key={count}
+                              type="button"
+                              onClick={() => setOpenCount(count)}
+                              disabled={busy === 'open'}
+                              className={cx(
+                                'h-9 rounded-lg border text-[10px] font-black tabular-nums transition disabled:opacity-35',
+                                openCount === count
+                                  ? 'border-acid/40 bg-acid/[0.1] text-acid'
+                                  : 'border-white/[0.08] bg-white/[0.02] text-white/40 hover:border-acid/25 hover:text-acid',
+                              )}
+                            >
+                              {count}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {error && (
+                        <div className="mt-2 rounded-lg border border-[#ff7189]/20 bg-[#ff7189]/[0.06] px-2.5 py-2 text-[8px] font-semibold text-[#ff9aac]">
+                          {error}
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => startDeck(activeDeck)}
+                        disabled={busy === 'open'}
+                        className="btn-acid mt-3 w-full !py-3.5 !text-[11px] uppercase tracking-[0.08em] disabled:opacity-40"
+                      >
+                        {busy === 'open' ? (
+                          <>
+                            <span className="spin-ring h-4 w-4 rounded-full border-2 border-[#041007]/30 border-t-[#041007]" />
+                            Открываем...
+                          </>
+                        ) : (
+                          <>
+                            <Icon name="cards" size={14} />
+                            Открыть за {formatPrice(total)}
+                          </>
+                        )}
+                      </button>
+                      <div className="mt-2 text-center text-[7px] font-semibold leading-relaxed text-white/22">
+                        {openCount > 1 ? `${openCount} карты в очереди · ` : ''}
+                        5 перекрутов на каждую карту
+                      </div>
+                    </div>
+                  )
+                })()
+              ) : upgradeResult ? (
                 <div>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
