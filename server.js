@@ -2024,37 +2024,47 @@ function pickSkinNearest(skins, target) {
   return best
 }
 
+function pickRandomSkin(candidates, fallback, target) {
+  if (candidates.length) {
+    return candidates[crypto.randomInt(0, candidates.length)]
+  }
+  return pickSkinNearest(fallback.length ? fallback : SKINS, target)
+}
+
 function rollGlyphDrop(user, deck) {
   const price = Math.max(1, Number(deck.price) || 1)
-  const skins = deck.pool
-    .map(([skinId]) => SKIN_BY_ID.get(skinId))
-    .filter(Boolean)
-  const lossPoolAll = skins.filter((skin) => skin.price < price)
-  const cheapLoss = lossPoolAll.filter((skin) => skin.price <= price * 0.25)
-  const lossPool = cheapLoss.length ? cheapLoss : lossPoolAll
+  const lossCandidates = SKINS.filter((skin) => skin.price <= price * 0.35)
+  const lossFallback = SKINS.filter((skin) => skin.price < price)
   const luck = ensureGlyphLuck(user)
-
-  const lossSkin = pickSkinNearest(
-    lossPool.length ? lossPool : skins,
-    price * (0.02 + Math.random() * 0.13),
-  )
+  const pickLoss = () =>
+    pickRandomSkin(
+      lossCandidates.length ? lossCandidates : lossFallback,
+      lossFallback,
+      price * (0.02 + Math.random() * 0.13),
+    )
 
   if (luck.cooldown > 0) {
     luck.cooldown -= 1
-    return lossSkin
+    return pickLoss()
   }
   if (Math.random() >= GLYPH_WIN_CHANCE) {
-    return lossSkin
+    return pickLoss()
   }
 
   const big = Math.random() < GLYPH_BIG_WIN_CHANCE
-  const multiplier = big ? 2.5 + Math.random() * 2.5 : 1.5 + Math.random()
-  const minRatio = big ? 2.5 : 1.5
-  const winPool = skins.filter((skin) => skin.price >= price * minRatio)
-  const target = price * multiplier
-  const winSkin = pickSkinNearest(winPool.length ? winPool : skins, target)
+  const min = price * (big ? 2.5 : 1.5)
+  const max = price * (big ? 5 : 2.5)
+  const winCandidates = SKINS.filter(
+    (skin) => skin.price >= min && skin.price <= max,
+  )
+  const winFallback = SKINS.filter((skin) => skin.price >= min)
+  const winSkin = pickRandomSkin(
+    winCandidates,
+    winFallback,
+    price * (big ? 2.5 + Math.random() * 2.5 : 1.5 + Math.random()),
+  )
   luck.cooldown = GLYPH_LUCK_COOLDOWN
-  return winSkin || lossSkin || skins[0] || null
+  return winSkin || pickLoss()
 }
 
 function publicGlyphDrop(user) {
