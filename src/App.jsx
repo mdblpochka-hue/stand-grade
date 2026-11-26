@@ -2048,11 +2048,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       const pending = pendingUpgradeRef.current
       if (pending) {
         onUpdate(pending)
-        setSelectedDropIds(
-          (pending.glyphDrop?.drops || [])
-            .filter((drop) => !drop.failed)
-            .map((drop) => drop.id),
-        )
+        setSelectedDropIds([])
         pendingUpgradeRef.current = null
       }
       setUpgradePhase('result')
@@ -2098,12 +2094,6 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
     resetUpgrade()
   }
 
-  function applySelection(glyphDrop) {
-    setSelectedDropIds(
-      (glyphDrop?.drops || []).filter((drop) => !drop.failed).map((drop) => drop.id),
-    )
-  }
-
   useEscape(closeModal, modalOpen)
 
   async function startDeck(deck) {
@@ -2130,7 +2120,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       setModalOpen(true)
       setDeckPreview(false)
       setReopening(false)
-      applySelection(data.glyphDrop)
+      setSelectedDropIds([])
       resetUpgrade()
       setUpgradeMultiplier(2)
     } catch (requestError) {
@@ -2168,7 +2158,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
     setModalOpen(true)
     setDeckPreview(false)
     setReopening(false)
-    applySelection(session)
+    setSelectedDropIds([])
     resetUpgrade()
   }
 
@@ -2184,7 +2174,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
         token,
       })
       onUpdate(data)
-      applySelection(data.glyphDrop)
+      setSelectedDropIds([])
       resetUpgrade()
     } catch (requestError) {
       setError(requestError.message)
@@ -2212,7 +2202,6 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       playCoin()
       onToast(data.message, 'success', 'Дроп забран')
       if (data.glyphDrop) {
-        applySelection(data.glyphDrop)
         resetUpgrade()
       } else {
         finishBatch()
@@ -2243,7 +2232,6 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       playCoin()
       onToast(data.message, 'success', 'Дроп продан')
       if (data.glyphDrop) {
-        applySelection(data.glyphDrop)
         resetUpgrade()
       } else {
         finishBatch()
