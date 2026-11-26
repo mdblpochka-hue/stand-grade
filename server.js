@@ -2968,22 +2968,6 @@ app.post('/api/glyph/reroll', auth, (req, res) => {
   })
 })
 
-app.post('/api/glyph/skip', auth, (req, res) => {
-  const user = req.user
-  const session = user.glyphDrop
-  if (!session?.drops?.length) return sendError(res, 409, 'NO_GLYPH_DROP', 'Сначала открой глиф')
-  const skipped = session.drops.length
-  user.glyphDrop = null
-  saveState()
-  return res.json({
-    ok: true,
-    glyphDrop: null,
-    user: publicUser(user),
-    daily: buildDaily(),
-    message: `Скип: ${skipped} ${skipped === 1 ? 'карта' : skipped < 5 ? 'карты' : 'карт'} сброшено`,
-  })
-})
-
 app.post('/api/glyph/collect', auth, (req, res) => {
   const user = req.user
   const session = user.glyphDrop

@@ -2237,16 +2237,21 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   }
 
   async function rerollDrop() {
-    if (!session || !canReroll || actionRef.current || busy) return
+    if (!session || !canReroll || actionRef.current || busy || skipping) return
     actionRef.current = true
     setBusy('reroll')
+    setSkipping(true)
     setError('')
     unlockAudio()
+    playGlyphSkip()
     try {
+      const animation = new Promise((resolve) => setTimeout(resolve, 700))
       const data = await apiRequest('/api/glyph/reroll', {
         method: 'POST',
         token,
       })
+      await animation
+      setSkipping(false)
       onUpdate(data)
       setSelectedDropIds([])
       resetUpgrade()
@@ -2256,6 +2261,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       onToast(requestError.message, 'error')
       if (requestError.data?.user) onUpdate(requestError.data)
     } finally {
+      setSkipping(false)
       setBusy('')
       actionRef.current = false
     }
@@ -2317,31 +2323,6 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       if (requestError.data?.user) onUpdate(requestError.data)
     } finally {
       setBusy('')
-      actionRef.current = false
-    }
-  }
-
-  async function skipDrop() {
-    if (!session || actionRef.current || busy || skipping || upgradePhase === 'spinning') {
-      return
-    }
-    actionRef.current = true
-    setSkipping(true)
-    setError('')
-    unlockAudio()
-    playGlyphSkip()
-    try {
-      const animation = new Promise((resolve) => setTimeout(resolve, 700))
-      const data = await apiRequest('/api/glyph/skip', { method: 'POST', token })
-      await animation
-      onUpdate(data)
-      finishBatch()
-    } catch (requestError) {
-      setError(requestError.message)
-      onToast(requestError.message, 'error')
-      if (requestError.data?.user) onUpdate(requestError.data)
-    } finally {
-      setSkipping(false)
       actionRef.current = false
     }
   }
@@ -2976,20 +2957,6 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                           className="hidden h-9 rounded-lg border border-white/[0.1] bg-white/[0.03] px-3 text-[8px] font-black uppercase tracking-[0.06em] text-white/45 transition hover:border-white/25 hover:text-white disabled:opacity-30 sm:block"
                         >
                           {allSelected ? 'Снять выбор' : 'Выбрать все'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={skipDrop}
-                          disabled={
-                            Boolean(busy) ||
-                            skipping ||
-                            upgradePhase === 'confirm' ||
-                            upgradePhase === 'spinning'
-                          }
-                          title="Скипнуть текущий дроп без возврата"
-                          className="h-9 rounded-lg border border-[#ff7189]/20 bg-[#ff7189]/[0.05] px-3 text-[8px] font-black uppercase tracking-[0.06em] text-[#ff9aac]/80 transition hover:bg-[#ff7189]/[0.12] disabled:opacity-30"
-                        >
-                          {skipping ? '...' : 'Скип'}
                         </button>
                       </div>
                     </div>
