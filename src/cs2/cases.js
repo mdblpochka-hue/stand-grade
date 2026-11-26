@@ -264,6 +264,41 @@ const CASE_DEFS = [
     filter: (skin) => skin.rarity === 'Restricted',
   },
   {
+    id: 'premium-50k',
+    name: 'Тёмный аукцион',
+    subtitle: 'Премиум · ножи и перчатки · бонус 7 500 КС',
+    category: 'premium',
+    priceCoins: 50000,
+    targetRtp: 0.7,
+    bonusCoins: 7500,
+    accent: '#ff5c87',
+    filter: (skin) =>
+      ['Knives', 'Gloves'].includes(skin.category) && skin.priceCoins >= 8000,
+  },
+  {
+    id: 'premium-100k',
+    name: 'Королевский сейф',
+    subtitle: 'Премиум · только топ-дроп · бонус 15 000 КС',
+    category: 'premium',
+    priceCoins: 100000,
+    targetRtp: 0.7,
+    bonusCoins: 15000,
+    accent: '#ffcf4d',
+    filter: (skin) =>
+      ['Knives', 'Gloves'].includes(skin.category) && skin.priceCoins >= 20000,
+  },
+  {
+    id: 'premium-200k',
+    name: 'Бездна CS2',
+    subtitle: 'Максимальный тир · бонус 40 000 КС',
+    category: 'premium',
+    priceCoins: 200000,
+    targetRtp: 0.6,
+    bonusCoins: 40000,
+    accent: '#b58bff',
+    filter: (skin) => skin.priceCoins >= 50000,
+  },
+  {
     id: 'daily-drop',
     name: 'Ежедневный дроп',
     subtitle: 'Бесплатно · раз в 24 часа',
@@ -284,6 +319,7 @@ export const CS2_CASE_CATEGORIES = [
   { id: 'glove', label: 'Перчатки' },
   { id: 'weapon', label: 'Оружие' },
   { id: 'rarity', label: 'Редкости' },
+  { id: 'premium', label: 'Премиум' },
   { id: 'free', label: 'Бесплатные' },
 ]
 

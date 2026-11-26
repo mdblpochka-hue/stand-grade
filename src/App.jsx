@@ -2652,6 +2652,11 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                   <div className="mt-0.5 text-[13px] font-extrabold tabular-nums text-white">
                     {formatPrice(displayPrice)}
                   </div>
+                  {deck.bonusCoins > 0 && (
+                    <div className="mt-0.5 text-[8px] font-black tabular-nums text-lime">
+                      +{formatPrice(deck.bonusCoins)} бонус
+                    </div>
+                  )}
                 </div>
                 <GlyphCardBack
                   deck={deck}
@@ -2819,6 +2824,11 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                           </span>
                           <span className="text-[9px] font-extrabold tabular-nums text-acid">
                             Итого {formatPrice(total)}
+                            {activeDeck.bonusCoins > 0 && (
+                              <span className="ml-1 text-lime">
+                                + {formatPrice(activeDeck.bonusCoins * openCount)} бонус
+                              </span>
+                            )}
                           </span>
                         </div>
                         <div className="mt-1.5 grid grid-cols-5 gap-1.5">
@@ -7377,6 +7387,7 @@ function CaseModal({
                     ? `Следующее открытие через ${formatCountdown(freeCooldownIn)}`
                     : 'Бесплатное открытие · раз в 24 часа'
                   : `Цена открытия ${formatPrice(caseData.price)}`}{' '}
+                {caseData.bonusCoins > 0 && `· бонус ${formatPrice(caseData.bonusCoins)} `}
                 · {caseData.totalItems || caseData.contents.length}{' '}
                 {plural(caseData.totalItems || caseData.contents.length, ['предмет', 'предмета', 'предметов'])}
               </div>
@@ -7800,6 +7811,11 @@ function CaseModal({
                       <span className="rounded-md border border-acid/25 bg-acid/[0.08] px-2 py-1 text-[9px] font-black tabular-nums text-acid">
                         {formatPrice(totalValue)}
                       </span>
+                      {caseData.bonusCoins > 0 && (
+                        <span className="rounded-md border border-lime/25 bg-lime/[0.08] px-2 py-1 text-[8px] font-black tabular-nums text-lime">
+                          + {formatPrice(caseData.bonusCoins * results.length)} бонус
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       {soldIds.length > 0 && (

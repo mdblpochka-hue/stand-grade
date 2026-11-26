@@ -566,7 +566,7 @@ const GLYPH_TAIL_AMP = 0.02
 const GLYPH_POOL_TARGET_RTP = 0.82
 const GLYPH_POOL_MIN_RATIO = 1 / 20
 
-function makeGlyphPool(price, skins = SKINS) {
+function makeGlyphPool(price, skins = SKINS, targetRtp = GLYPH_POOL_TARGET_RTP) {
   const loss = []
   const mid = []
   const tail = []
@@ -620,7 +620,7 @@ function makeGlyphPool(price, skins = SKINS) {
   let hi = 1000
   for (let index = 0; index < 60; index += 1) {
     const guess = (lo + hi) / 2
-    if (metrics(guess) < GLYPH_POOL_TARGET_RTP) lo = guess
+    if (metrics(guess) < targetRtp) lo = guess
     else hi = guess
   }
   const boost = (lo + hi) / 2
@@ -1170,6 +1170,7 @@ const CS2_CASE_KICKERS = {
   glove: 'GLOVE CASE',
   weapon: 'WEAPON CASE',
   rarity: 'RARITY CASE',
+  premium: 'PREMIUM CASE',
   free: 'FREE DAILY',
 }
 const CS2_SKINS_BY_PRICE = [...CS2_SKINS].sort(
@@ -1192,6 +1193,7 @@ const CS2_CASES = CS2_SKINS.length
       subtitle: caseData.subtitle,
       kicker: CS2_CASE_KICKERS[caseData.category] || 'CS2 DROP',
       price: Math.max(0, Math.round(Number(caseData.priceCoins) || 0)),
+      bonusCoins: Math.max(0, Math.round(Number(caseData.bonusCoins) || 0)),
       accent: caseData.accent || '#35ff87',
       featuredSkinId: caseData.featured?.id || null,
       pool: caseData.pool.map((entry) => [
@@ -1206,7 +1208,11 @@ const CS2_CASE_PAYLOADS = CS2_CASES.map((config) =>
 )
 
 function buildCs2GlyphDeck(deck) {
-  const pool = makeGlyphPool(deck.price, CS2_SKINS)
+  const pool = makeGlyphPool(
+    deck.price,
+    CS2_SKINS,
+    Number.isFinite(Number(deck.targetRtp)) ? Number(deck.targetRtp) : undefined,
+  )
   const payload = buildCasePayload(
     { ...deck, featuredSkinId: null, pool },
     CS2_CONTEXT,
@@ -1242,6 +1248,9 @@ const CS2_GLYPH_DECKS = [
   { id: 'aurora', name: 'Аврора', subtitle: 'Печать северного света', kicker: 'AURORA SEAL', price: 6000, accent: '#5effc9' },
   { id: 'singularity', name: 'Сингулярность', subtitle: 'Предел вероятности', kicker: 'SINGULARITY', price: 12000, accent: '#ff7ad9' },
   { id: 'abyss', name: 'Бездна', subtitle: 'Последняя печать', kicker: 'ABYSS SEAL', price: 25000, accent: '#f3fff6' },
+  { id: 'obsidian', name: 'Обсидиан', subtitle: 'Печать хайроллера · бонус 7 500 КС', kicker: 'OBSIDIAN SEAL', price: 50000, targetRtp: 0.7, bonusCoins: 7500, accent: '#ff5c87' },
+  { id: 'crown', name: 'Корона', subtitle: 'Королевская печать · бонус 15 000 КС', kicker: 'CROWN SEAL', price: 100000, targetRtp: 0.7, bonusCoins: 15000, accent: '#ffcf4d' },
+  { id: 'infinity', name: 'Бесконечность', subtitle: 'Предел хайроллера · бонус 40 000 КС', kicker: 'INFINITY SEAL', price: 200000, targetRtp: 0.6, bonusCoins: 40000, accent: '#b58bff' },
 ]
 const CS2_GLYPHS = CS2_SKINS.length ? CS2_GLYPH_DECKS.map(buildCs2GlyphDeck) : []
 const CS2_GLYPH_BY_ID = new Map(CS2_GLYPHS.map((deck) => [deck.id, deck]))
@@ -2402,7 +2411,7 @@ function glyphDropWeight(ratio) {
   return main + near + tail
 }
 
-function buildGlyphDropPool(cost, bank) {
+function buildGlyphDropPool(cost, bank, targetRtp = GLYPH_TARGET_RTP) {
   const entries = []
   for (const skin of SKINS) {
     const ratio = skin.price / cost
@@ -2431,7 +2440,7 @@ function buildGlyphDropPool(cost, bank) {
   let hi = 10000
   for (let index = 0; index < 60; index += 1) {
     const mid = (lo + hi) / 2
-    if (expectedRatio(mid) < GLYPH_TARGET_RTP) lo = mid
+    if (expectedRatio(mid) < targetRtp) lo = mid
     else hi = mid
   }
   const boost = (lo + hi) / 2
@@ -2444,7 +2453,10 @@ function buildGlyphDropPool(cost, bank) {
 function rollGlyphDrop(deck) {
   const cost = Math.max(1, Number(deck.price) || 1)
   const bank = Math.max(0, Number(state.glyphBank) || 0)
-  const pool = buildGlyphDropPool(cost, bank)
+  const targetRtp = Number.isFinite(Number(deck.targetRtp))
+    ? Number(deck.targetRtp)
+    : GLYPH_TARGET_RTP
+  const pool = buildGlyphDropPool(cost, bank, targetRtp)
   let skin = null
 
   if (pool.length) {
@@ -3236,6 +3248,8 @@ app.post('/api/open-case', auth, (req, res) => {
     })
   }
 
+  const bonusPerOpen = Math.max(0, Math.round(Number(config.bonusCoins) || 0))
+  const bonusTotal = roundGold(bonusPerOpen * count)
   const openings = []
   for (let index = 0; index < count; index += 1) {
     const { skin: winner, pity } = pickCaseSkinWithPity(user, config)
@@ -3243,16 +3257,17 @@ app.post('/api/open-case', auth, (req, res) => {
     const entry = makeInventoryEntry(winner)
     user.inventory.unshift(entry)
     const publicWinner = { ...winner, instanceId: entry.instanceId, obtainedAt: entry.obtainedAt }
-    openings.push({ winner: publicWinner, reel, pity })
+    openings.push({ winner: publicWinner, reel, pity, bonusCoins: bonusPerOpen })
     pushCaseHistory(user, config, winner, entry.instanceId)
     pushLiveDrop(user, winner, 'case')
   }
 
-  user.balance = roundGold(user.balance - totalPrice)
+  user.balance = roundGold(user.balance - totalPrice + bonusTotal)
   if (isFree) user.lastFreeCaseAt = new Date().toISOString()
   saveState()
 
   const totalValue = roundGold(openings.reduce((sum, opening) => sum + opening.winner.price, 0))
+  const bonusNote = bonusTotal > 0 ? ` · бонус +${formatGold(bonusTotal)}` : ''
 
   res.json({
     ok: true,
@@ -3262,13 +3277,15 @@ app.post('/api/open-case', auth, (req, res) => {
     winner: openings[0].winner,
     reel: openings[0].reel,
     totalValue,
+    bonusPerOpen,
+    bonusTotal,
     user: publicUser(user),
     daily: buildDaily(),
     feedEntry: liveFeed[0],
     message:
       count > 1
-        ? `Открыто ${count} кейсов на ${formatGold(totalValue)}`
-        : `Выпал ${openings[0].winner.name}`,
+        ? `Открыто ${count} кейсов на ${formatGold(totalValue)}${bonusNote}`
+        : `Выпал ${openings[0].winner.name}${bonusNote}`,
   })
 })
 
@@ -3299,7 +3316,9 @@ app.post('/api/open-glyph', auth, (req, res) => {
       rollId: crypto.randomUUID(),
     }
   })
-  user.balance = roundGold(user.balance - totalPrice)
+  const bonusPerCard = Math.max(0, Math.round(Number(deck.bonusCoins) || 0))
+  const bonusTotal = roundGold(bonusPerCard * count)
+  user.balance = roundGold(user.balance - totalPrice + bonusTotal)
   user.glyphDrop = {
     id: crypto.randomUUID(),
     deckId: deck.id,
@@ -3312,18 +3331,21 @@ app.post('/api/open-glyph', auth, (req, res) => {
   }
   saveState()
 
+  const bonusNote = bonusTotal > 0 ? ` · бонус +${formatGold(bonusTotal)}` : ''
   res.json({
     ok: true,
     deck: deck.payload,
     glyphDrop: publicGlyphDrop(user),
     winner: { ...drops[0].currentDrop },
     count,
+    bonusPerCard,
+    bonusTotal,
     user: publicUser(user),
     daily: buildDaily(),
     message:
       count > 1
-        ? `Открыто ${count} глифов`
-        : `Глиф раскрыт: ${drops[0].currentDrop.name}`,
+        ? `Открыто ${count} глифов${bonusNote}`
+        : `Глиф раскрыт: ${drops[0].currentDrop.name}${bonusNote}`,
   })
 })
 
