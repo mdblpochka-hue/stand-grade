@@ -1980,6 +1980,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   const [activeDeckId, setActiveDeckId] = useState(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [deckPreview, setDeckPreview] = useState(false)
+  const [reopening, setReopening] = useState(false)
   const [openCount, setOpenCount] = useState(1)
   const [selectedDropIds, setSelectedDropIds] = useState([])
   const [busy, setBusy] = useState('')
@@ -2079,6 +2080,21 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
     if (upgradePhase === 'spinning') return
     setModalOpen(false)
     setDeckPreview(false)
+    setReopening(false)
+    resetUpgrade()
+  }
+
+  function finishBatch() {
+    const deckId = session?.deckId || activeDeckId || null
+    if (!deckId) {
+      closeModal()
+      return
+    }
+    setActiveDeckId(deckId)
+    setModalOpen(true)
+    setDeckPreview(true)
+    setReopening(true)
+    setOpenCount(1)
     resetUpgrade()
   }
 
@@ -2113,6 +2129,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       setActiveDeckId(deck.id)
       setModalOpen(true)
       setDeckPreview(false)
+      setReopening(false)
       applySelection(data.glyphDrop)
       resetUpgrade()
       setUpgradeMultiplier(2)
@@ -2131,12 +2148,14 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       setActiveDeckId(session.deckId)
       setModalOpen(true)
       setDeckPreview(false)
+      setReopening(false)
       resetUpgrade()
       return
     }
     setActiveDeckId(deck.id)
     setOpenCount(1)
     setDeckPreview(true)
+    setReopening(false)
     setModalOpen(true)
     resetUpgrade()
     setUpgradeMultiplier(2)
@@ -2148,6 +2167,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
     setActiveDeckId(session.deckId)
     setModalOpen(true)
     setDeckPreview(false)
+    setReopening(false)
     applySelection(session)
     resetUpgrade()
   }
@@ -2195,7 +2215,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
         applySelection(data.glyphDrop)
         resetUpgrade()
       } else {
-        closeModal()
+        finishBatch()
       }
     } catch (requestError) {
       setError(requestError.message)
@@ -2226,7 +2246,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
         applySelection(data.glyphDrop)
         resetUpgrade()
       } else {
-        closeModal()
+        finishBatch()
       }
     } catch (requestError) {
       setError(requestError.message)
@@ -2492,6 +2512,16 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                   return (
                     <div className="flex-1 overflow-y-auto p-4">
                       <div className="mx-auto w-full max-w-[440px]">
+                      {reopening && (
+                        <div className="mb-3 rounded-xl border border-acid/25 bg-acid/[0.07] px-3 py-2.5 text-center">
+                          <div className="text-[8px] font-black uppercase tracking-[0.14em] text-acid/80">
+                            Пачка закончилась
+                          </div>
+                          <div className="mt-0.5 text-[8px] font-semibold text-white/35">
+                            Все карты разобраны или сгорели — можно открыть снова
+                          </div>
+                        </div>
+                      )}
                       <div className="flex justify-center">
                         <GlyphCardBack deck={activeDeck} className="h-[220px] w-[165px]" />
                       </div>
@@ -2581,15 +2611,16 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                         ) : (
                           <>
                             <Icon name="cards" size={14} />
-                            Открыть за {formatPrice(total)}
+                            {reopening ? 'Открыть снова' : 'Открыть'} за {formatPrice(total)}
                           </>
                         )}
                       </button>
                       <div className="mt-2 text-center text-[7px] font-semibold leading-relaxed text-white/22">
-                        {openCount > 1
-                          ? `${openCount} ${openCount < 5 ? 'карты' : 'карт'} в пачке · `
-                          : ''}
-                        перекрут заменяет всю пачку сразу
+                        {reopening
+                          ? 'Та же печать · новый дроп'
+                          : openCount > 1
+                            ? `${openCount} ${openCount < 5 ? 'карты' : 'карт'} в пачке · перекрут заменяет всю пачку сразу`
+                            : 'перекрут заменяет всю пачку сразу'}
                       </div>
                       </div>
                     </div>
@@ -2778,9 +2809,14 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                               type="button"
                               onClick={collectDrop}
                               disabled={Boolean(busy) || (!selectedDrops.length && !hasFailed)}
-                              className="h-9 rounded-lg border border-white/[0.12] bg-white/[0.04] px-4 text-[9px] font-black uppercase tracking-[0.08em] text-white/75 transition hover:bg-white/[0.08] disabled:opacity-35"
+                              className={cx(
+                                'h-9 rounded-lg border px-4 text-[9px] font-black uppercase tracking-[0.08em] transition disabled:opacity-35',
+                                !selectableDrops.length && hasFailed
+                                  ? 'border-acid/60 bg-acid text-[#041007] shadow-[0_0_24px_rgba(53,255,135,.28)] hover:bg-[#5cffa0]'
+                                  : 'border-white/[0.12] bg-white/[0.04] text-white/75 hover:bg-white/[0.08]',
+                              )}
                             >
-                              Забрать
+                              {!selectableDrops.length && hasFailed ? 'Открыть снова' : 'Забрать'}
                             </button>
                             <button
                               type="button"
@@ -2798,14 +2834,16 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                             >
                               Апгрейд
                             </button>
-                            <button
-                              type="button"
-                              onClick={sellDrop}
-                              disabled={Boolean(busy) || (!selectedDrops.length && !hasFailed)}
-                              className="h-9 rounded-lg border border-[#ffcf4d]/25 bg-[#ffcf4d]/[0.06] px-4 text-[9px] font-black uppercase tracking-[0.08em] text-[#ffe6a3] transition hover:bg-[#ffcf4d]/[0.12] disabled:opacity-35"
-                            >
-                              Продать {formatPrice(selectedValue)}
-                            </button>
+                            {selectedDrops.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={sellDrop}
+                                disabled={Boolean(busy)}
+                                className="h-9 rounded-lg border border-[#ffcf4d]/25 bg-[#ffcf4d]/[0.06] px-4 text-[9px] font-black uppercase tracking-[0.08em] text-[#ffe6a3] transition hover:bg-[#ffcf4d]/[0.12] disabled:opacity-35"
+                              >
+                                Продать {formatPrice(selectedValue)}
+                              </button>
+                            )}
                           </>
                         )}
                       </div>
@@ -2830,11 +2868,15 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                         ? 'Проверь шанс и запускай апгрейд'
                         : upgradePhase === 'result'
                           ? resultLosses > 0
-                            ? 'Апгрейд не прошёл — все оставшиеся замены сгорели'
+                            ? selectableDrops.length
+                              ? 'Апгрейд не прошёл — все оставшиеся замены сгорели'
+                              : 'Все карты сгорели — можно открыть снова'
                             : 'Выбери карты для следующего действия'
-                          : hasFailed && session.attemptsLeft <= 0
-                            ? 'Замены сгорели после неудачного апгрейда'
-                            : 'Клик по карте выбирает её · апгрейд идёт по выбранным'}
+                          : !selectableDrops.length && hasFailed
+                            ? 'Все карты сгорели — открой печать снова'
+                            : hasFailed && session.attemptsLeft <= 0
+                              ? 'Замены сгорели после неудачного апгрейда'
+                              : 'Клик по карте выбирает её · апгрейд идёт по выбранным'}
                     </div>
                   </div>
                 </div>
