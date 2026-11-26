@@ -10282,7 +10282,10 @@ export default function App() {
         onSwitchMode={(mode) => {
           if (mode === 'stand') setSiteMode('stand')
         }}
-        onLogout={handleLogout}
+        onLogout={() => {
+          setSiteMode('stand')
+          handleLogout()
+        }}
       />
     )
   }
