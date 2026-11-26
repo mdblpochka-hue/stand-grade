@@ -100,15 +100,17 @@ const BATTLE_ROUND_OPTIONS = [1, 3, 5]
 const GLYPH_REROLLS = 5
 const GLYPH_UPGRADE_MULTIPLIERS = [2, 3, 5, 10]
 const GLYPH_OPEN_COUNTS = [1, 2, 3, 5, 10]
-const GLYPH_WIN_CHANCE = 0.5
-const GLYPH_BIG_WIN_CHANCE = 0.25
-const GLYPH_LUCK_COOLDOWN = 12
+const GLYPH_TARGET_RTP = Math.min(
+  0.99,
+  Math.max(0.1, Number(process.env.GLYPH_TARGET_RTP) || 0.85),
+)
+const GLYPH_MIN_RATIO = 0.15
+const GLYPH_MAX_RATIO = 20
+const GLYPH_BANK_START = Math.max(
+  0,
+  Number(process.env.GLYPH_BANK_START) || 10000,
+)
 const GLYPH_UPGRADE_EDGE = 0.9
-const GLYPH_LOSS_TIERS = [
-  { min: 0.55, max: 0.9 },
-  { min: 0.25, max: 0.55 },
-  { min: 0.02, max: 0.2 },
-]
 // Заявки: голда сверх дневного лимита и история заявок.
 const MAX_GOLD_REQUEST = Math.max(1000, Number(process.env.MAX_GOLD_REQUEST) || 100000)
 const APPLICATION_HISTORY_LIMIT = 500
@@ -538,8 +540,8 @@ const GLYPH_MID_SIGMA = 0.42
 const GLYPH_TAIL_DECAY = 1.1
 const GLYPH_MID_AMP = 0.04
 const GLYPH_TAIL_AMP = 0.02
-const GLYPH_TARGET_RTP = 0.82
-const GLYPH_MIN_RATIO = 1 / 20
+const GLYPH_POOL_TARGET_RTP = 0.82
+const GLYPH_POOL_MIN_RATIO = 1 / 20
 
 function makeGlyphPool(price) {
   const loss = []
@@ -551,7 +553,7 @@ function makeGlyphPool(price) {
 
   for (const skin of SKINS) {
     const ratio = skin.price / price
-    if (!Number.isFinite(ratio) || ratio < GLYPH_MIN_RATIO) continue
+    if (!Number.isFinite(ratio) || ratio < GLYPH_POOL_MIN_RATIO) continue
     if (ratio < 1) {
       const spread = Math.log(ratio) - Math.log(GLYPH_LOSS_CENTER)
       const bell = Math.exp(
@@ -595,7 +597,7 @@ function makeGlyphPool(price) {
   let hi = 1000
   for (let index = 0; index < 60; index += 1) {
     const guess = (lo + hi) / 2
-    if (metrics(guess) < GLYPH_TARGET_RTP) lo = guess
+    if (metrics(guess) < GLYPH_POOL_TARGET_RTP) lo = guess
     else hi = guess
   }
   const boost = (lo + hi) / 2
@@ -1055,7 +1057,7 @@ const GLYPH_DECKS = [
 const GLYPHS = GLYPH_DECKS.map((deck) => {
   const pool = makeGlyphPool(deck.price)
   const payload = buildCasePayload({ ...deck, pool })
-  const maxFeaturedPrice = deck.price * 5
+  const maxFeaturedPrice = deck.price * 20
   const candidates = pool
     .map(([skinId]) => SKIN_BY_ID.get(skinId))
     .filter(
@@ -1274,6 +1276,7 @@ function defaultState() {
     version: 3,
     dayKey: null,
     dailyDistributed: 0,
+    glyphBank: GLYPH_BANK_START,
     users,
     promos: defaultPromos(),
     applications: [],
@@ -1284,13 +1287,6 @@ function defaultState() {
 
 function migrateUser(user) {
   user.tokenVersion = Math.max(0, Math.trunc(Number(user.tokenVersion) || 0))
-  if (!user.glyphLuck || typeof user.glyphLuck !== 'object') {
-    user.glyphLuck = { cooldown: 0 }
-  }
-  user.glyphLuck.cooldown = Math.max(
-    0,
-    Math.min(GLYPH_LUCK_COOLDOWN, Math.trunc(Number(user.glyphLuck.cooldown) || 0)),
-  )
   if (!('glyphDrop' in user)) user.glyphDrop = null
   if (user.glyphDrop) {
     const session = user.glyphDrop
@@ -1406,6 +1402,9 @@ function normalizeState(parsed) {
     parsed.registrationDevices = {}
   }
   parsed.dailyDistributed = Number(parsed.dailyDistributed) || 0
+  parsed.glyphBank = Number.isFinite(Number(parsed.glyphBank))
+    ? Math.max(0, Number(parsed.glyphBank))
+    : GLYPH_BANK_START
   parsed.version = 3
   return parsed
 }
@@ -2011,74 +2010,92 @@ function glyphUpgradeChance(basePrice, targetPrice) {
   return Math.round(Math.min(95, Math.max(0.01, chance)) * 100) / 100
 }
 
-function ensureGlyphLuck(user) {
-  if (!user.glyphLuck || typeof user.glyphLuck !== 'object') {
-    user.glyphLuck = { cooldown: 0 }
-  }
-  const cooldown = Math.trunc(Number(user.glyphLuck.cooldown) || 0)
-  user.glyphLuck.cooldown = Math.max(0, Math.min(GLYPH_LUCK_COOLDOWN, cooldown))
-  return user.glyphLuck
+function glyphDropWeight(ratio) {
+  const main = Math.exp(
+    -0.5 * Math.pow((Math.log(ratio) - Math.log(0.55)) / 0.38, 2),
+  )
+  const near = 0.6 * Math.exp(
+    -0.5 * Math.pow((Math.log(ratio) - Math.log(0.95)) / 0.16, 2),
+  )
+  const tail =
+    ratio >= 1.2 ? 0.12 * Math.exp(-(ratio - 1.2) / 1.8) : 0
+  return main + near + tail
 }
 
-function pickSkinNearest(skins, target) {
-  if (!skins.length) return null
-  let best = skins[0]
-  for (const skin of skins) {
-    if (Math.abs(skin.price - target) < Math.abs(best.price - target)) best = skin
+function buildGlyphDropPool(cost, bank) {
+  const entries = []
+  for (const skin of SKINS) {
+    const ratio = skin.price / cost
+    if (ratio < GLYPH_MIN_RATIO || ratio > GLYPH_MAX_RATIO) continue
+    // Анти-минус: дорогой дроп не может выпасть, если банк не покроет
+    // превышение его цены над ставкой.
+    if (skin.price - cost > bank) continue
+    const base = glyphDropWeight(ratio)
+    if (base <= 0) continue
+    entries.push({ skin, base, profit: skin.price > cost })
   }
-  return best
+  if (!entries.length) return []
+
+  const expectedRatio = (boost) => {
+    let total = 0
+    let value = 0
+    for (const entry of entries) {
+      const weight = entry.base * (entry.profit ? boost : 1)
+      total += weight
+      value += weight * (entry.skin.price / cost)
+    }
+    return total > 0 ? value / total : 0
+  }
+
+  let lo = 0.0001
+  let hi = 10000
+  for (let index = 0; index < 60; index += 1) {
+    const mid = (lo + hi) / 2
+    if (expectedRatio(mid) < GLYPH_TARGET_RTP) lo = mid
+    else hi = mid
+  }
+  const boost = (lo + hi) / 2
+  return entries.map((entry) => [
+    entry.skin,
+    entry.base * (entry.profit ? boost : 1),
+  ])
 }
 
-function pickRandomSkin(candidates, fallback, target) {
-  if (candidates.length) {
-    return candidates[crypto.randomInt(0, candidates.length)]
-  }
-  return pickSkinNearest(fallback.length ? fallback : SKINS, target)
-}
+function rollGlyphDrop(deck) {
+  const cost = Math.max(1, Number(deck.price) || 1)
+  const bank = Math.max(0, Number(state.glyphBank) || 0)
+  const pool = buildGlyphDropPool(cost, bank)
+  let skin = null
 
-function pickGlyphLossSkin(price) {
-  const roll = Math.random()
-  const tier =
-    roll < 0.13 ? GLYPH_LOSS_TIERS[0] : roll < 0.36 ? GLYPH_LOSS_TIERS[1] : GLYPH_LOSS_TIERS[2]
-  const min = price * tier.min
-  const max = price * tier.max
-  const candidates = SKINS.filter(
-    (skin) => skin.price >= min && skin.price <= max,
-  )
-  const fallback = SKINS.filter((skin) => skin.price < price)
-  return pickRandomSkin(
-    candidates,
-    fallback,
-    price * ((tier.min + tier.max) / 2),
-  )
-}
-
-function rollGlyphDrop(user, deck) {
-  const price = Math.max(1, Number(deck.price) || 1)
-  const luck = ensureGlyphLuck(user)
-
-  if (luck.cooldown > 0) {
-    luck.cooldown -= 1
-    return pickGlyphLossSkin(price)
-  }
-  if (Math.random() >= GLYPH_WIN_CHANCE) {
-    return pickGlyphLossSkin(price)
+  if (pool.length) {
+    const weighted = pool.map(([item, weight]) => [
+      item,
+      Math.max(1, Math.round(weight * 1e6)),
+    ])
+    const total = weighted.reduce((sum, [, weight]) => sum + weight, 0)
+    let cursor = crypto.randomInt(0, total)
+    for (const [item, weight] of weighted) {
+      if (cursor < weight) {
+        skin = item
+        break
+      }
+      cursor -= weight
+    }
+    if (!skin) skin = weighted[weighted.length - 1][0]
   }
 
-  const big = Math.random() < GLYPH_BIG_WIN_CHANCE
-  const min = price * (big ? 2.5 : 1.5)
-  const max = price * (big ? 5 : 2.5)
-  const winCandidates = SKINS.filter(
-    (skin) => skin.price >= min && skin.price <= max,
-  )
-  const winFallback = SKINS.filter((skin) => skin.price >= min)
-  const winSkin = pickRandomSkin(
-    winCandidates,
-    winFallback,
-    price * (big ? 2.5 + Math.random() * 2.5 : 1.5 + Math.random()),
-  )
-  luck.cooldown = GLYPH_LUCK_COOLDOWN
-  return winSkin || pickGlyphLossSkin(price)
+  if (!skin) {
+    const fallback = SKINS.filter(
+      (item) =>
+        item.price >= cost * GLYPH_MIN_RATIO &&
+        item.price <= cost * GLYPH_MAX_RATIO &&
+        item.price - cost <= bank,
+    ).sort((a, b) => a.price - b.price)
+    skin = fallback[0] || SKINS[0]
+  }
+
+  state.glyphBank = Math.max(0, roundGold(bank + cost - skin.price))
+  return skin
 }
 
 function publicGlyphDrop(user) {
@@ -2892,7 +2909,7 @@ app.post('/api/open-glyph', auth, (req, res) => {
   }
 
   const drops = Array.from({ length: count }, () => {
-    const skin = rollGlyphDrop(user, deck) || { ...weightedPickFrom(deck.pool) }
+    const skin = rollGlyphDrop(deck) || { ...weightedPickFrom(deck.pool) }
     return {
       id: crypto.randomUUID(),
       currentDrop: { ...skin },
@@ -2946,8 +2963,15 @@ app.post('/api/glyph/reroll', auth, (req, res) => {
   if (!deck) return sendError(res, 404, 'GLYPH_NOT_FOUND', 'Печать не найдена')
 
   const rollCount = session.drops.length
+  for (const drop of session.drops) {
+    const oldSkin = SKIN_BY_ID.get(drop.currentDrop.id) || drop.currentDrop
+    state.glyphBank = Math.max(
+      0,
+      roundGold((Number(state.glyphBank) || 0) + oldSkin.price - deck.price),
+    )
+  }
   session.drops = Array.from({ length: rollCount }, () => {
-    const skin = rollGlyphDrop(user, deck) || { ...weightedPickFrom(deck.pool) }
+    const skin = rollGlyphDrop(deck) || { ...weightedPickFrom(deck.pool) }
     return {
       id: crypto.randomUUID(),
       currentDrop: { ...skin },
