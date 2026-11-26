@@ -3409,15 +3409,42 @@ app.post('/api/glyph/reroll', auth, (req, res) => {
   })
 })
 
+function resolveGlyphSelection(session, body = {}) {
+  const rawIds = Array.isArray(body?.dropIds)
+    ? body.dropIds.map(String)
+    : [String(body?.dropId || '')].filter(Boolean)
+  const uniqueIds = [...new Set(rawIds)]
+  const selected = (session?.drops || []).filter(
+    (drop) => uniqueIds.includes(drop.id) && !drop.failed,
+  )
+  // Совместимость с устаревшей вкладкой: если ID карт успели смениться,
+  // пробуем найти выбранные карты по скину и цене.
+  if (!selected.length && Array.isArray(body?.cards) && session?.drops) {
+    for (const card of body.cards) {
+      const skinId = String(card?.skinId || '')
+      const price = Number(card?.price)
+      if (!skinId) continue
+      const drop = session.drops.find(
+        (item) =>
+          !item.failed &&
+          !uniqueIds.includes(item.id) &&
+          String(item.currentDrop?.id || '') === skinId &&
+          Number(item.currentDrop?.price) === price,
+      )
+      if (drop) {
+        selected.push(drop)
+        uniqueIds.push(drop.id)
+      }
+    }
+  }
+  return { uniqueIds, selected }
+}
+
 app.post('/api/glyph/collect', auth, (req, res) => {
   const user = req.user
   const session = user.glyphDrop
   if (!session?.drops?.length) return sendError(res, 409, 'NO_GLYPH_DROP', 'Сначала открой глиф')
-  const rawIds = Array.isArray(req.body?.dropIds)
-    ? req.body.dropIds.map(String)
-    : [String(req.body?.dropId || '')].filter(Boolean)
-  const uniqueIds = [...new Set(rawIds)]
-  const selected = session.drops.filter((drop) => uniqueIds.includes(drop.id) && !drop.failed)
+  const { uniqueIds, selected } = resolveGlyphSelection(session, req.body)
   const hasFailed = session.drops.some((drop) => drop.failed)
   if (!selected.length && !hasFailed) {
     return sendError(res, 400, 'NO_DROP_SELECTED', 'Выбери хотя бы один дроп', { user: publicUser(user), glyphDrop: publicGlyphDrop(user) })
@@ -3460,11 +3487,7 @@ app.post('/api/glyph/sell', auth, (req, res) => {
   const user = req.user
   const session = user.glyphDrop
   if (!session?.drops?.length) return sendError(res, 409, 'NO_GLYPH_DROP', 'Сначала открой глиф')
-  const rawIds = Array.isArray(req.body?.dropIds)
-    ? req.body.dropIds.map(String)
-    : [String(req.body?.dropId || '')].filter(Boolean)
-  const uniqueIds = [...new Set(rawIds)]
-  const selected = session.drops.filter((drop) => uniqueIds.includes(drop.id) && !drop.failed)
+  const { uniqueIds, selected } = resolveGlyphSelection(session, req.body)
   const hasFailed = session.drops.some((drop) => drop.failed)
   if (!selected.length && !hasFailed) {
     return sendError(res, 400, 'NO_DROP_SELECTED', 'Выбери хотя бы один дроп', { user: publicUser(user), glyphDrop: publicGlyphDrop(user) })
@@ -3503,13 +3526,7 @@ app.post('/api/glyph/upgrade', auth, (req, res) => {
   const user = req.user
   const session = user.glyphDrop
   if (!session?.drops?.length) return sendError(res, 409, 'NO_GLYPH_DROP', 'Сначала открой глиф')
-  const rawIds = Array.isArray(req.body?.dropIds)
-    ? req.body.dropIds.map(String)
-    : [String(req.body?.dropId || '')].filter(Boolean)
-  const uniqueIds = [...new Set(rawIds)]
-  const selected = session.drops.filter(
-    (drop) => uniqueIds.includes(drop.id) && !drop.failed,
-  )
+  const { selected } = resolveGlyphSelection(session, req.body)
   if (!selected.length) return sendError(res, 400, 'NO_DROP_SELECTED', 'Выбери хотя бы один дроп', { user: publicUser(user), glyphDrop: publicGlyphDrop(user) })
 
   const multiplier = Math.trunc(Number(req.body?.multiplier))

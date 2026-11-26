@@ -2459,7 +2459,13 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       const data = await apiRequest('/api/glyph/collect', {
         method: 'POST',
         token,
-        body: { dropIds: selectedDrops.map((drop) => drop.id) },
+        body: {
+          dropIds: selectedDrops.map((drop) => drop.id),
+          cards: selectedDrops.map((drop) => ({
+            skinId: drop.currentDrop?.id,
+            price: drop.currentDrop?.price,
+          })),
+        },
       })
       onUpdate(data)
       playCoin()
@@ -2494,7 +2500,13 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       const data = await apiRequest('/api/glyph/sell', {
         method: 'POST',
         token,
-        body: { dropIds: selectedDrops.map((drop) => drop.id) },
+        body: {
+          dropIds: selectedDrops.map((drop) => drop.id),
+          cards: selectedDrops.map((drop) => ({
+            skinId: drop.currentDrop?.id,
+            price: drop.currentDrop?.price,
+          })),
+        },
       })
       onUpdate(data)
       playCoin()
@@ -2558,6 +2570,10 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
         body: {
           multiplier: upgradeMultiplier,
           dropIds: selectedDrops.map((drop) => drop.id),
+          cards: selectedDrops.map((drop) => ({
+            skinId: drop.currentDrop?.id,
+            price: drop.currentDrop?.price,
+          })),
         },
       })
       pendingUpgradeRef.current = data
