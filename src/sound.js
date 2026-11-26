@@ -106,7 +106,17 @@ export function startSpinSound(duration, variant = 'case') {
 export function playCaseResult(rarity = 'Common') {
   if (!enabled) return
   const order = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary', 'Arcane', 'Nameless']
-  const tier = Math.max(0, order.indexOf(rarity))
+  const cs2Tiers = {
+    'Consumer Grade': 0,
+    'Industrial Grade': 1,
+    'Mil-Spec Grade': 2,
+    Restricted: 3,
+    Classified: 4,
+    Covert: 5,
+    Extraordinary: 6,
+    Contraband: 6,
+  }
+  const tier = cs2Tiers[rarity] ?? Math.max(0, order.indexOf(rarity))
   const baseNotes = [392, 523.25, 659.25, 783.99, 987.77, 1174.66, 1396.91]
   const notes = baseNotes.slice(0, 3 + Math.min(4, tier))
   notes.forEach((freq, index) => {

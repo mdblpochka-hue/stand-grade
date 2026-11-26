@@ -21,7 +21,7 @@ import {
   startSpinSound,
   unlockAudio,
 } from './sound'
-import CS2DropApp, { SiteModeSwitch } from './cs2/CS2DropApp'
+import { CS2_CURRENCIES, formatCs2Price } from './cs2/currency'
 
 /* ------------------------------------------------------------------ */
 /*  Constants & helpers                                                */
@@ -31,9 +31,26 @@ const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
 const TOKEN_KEY = 'stand_grade_token'
 const FAST_KEY = 'stand_grade_fast_anim'
 const SITE_MODE_KEY = 'stand_grade_site_mode'
+const CS2_CURRENCY_KEY = 'stand_grade_cs2_currency'
 const SITE_TITLES = {
   stand: 'STAND GRADE — кейсы Standoff 2',
   cs2: 'CS2 DROP — Counter-Strike 2 case arena',
+}
+
+let ACTIVE_GAME = 'stand'
+let ACTIVE_CURRENCY = 'coins'
+
+function readCs2Currency() {
+  try {
+    const value = localStorage.getItem(CS2_CURRENCY_KEY)
+    return CS2_CURRENCIES.some((currency) => currency.id === value) ? value : 'coins'
+  } catch {
+    return 'coins'
+  }
+}
+
+function gameUnit() {
+  return ACTIVE_GAME === 'cs2' ? 'КС' : 'G'
 }
 
 function readSiteMode() {
@@ -44,7 +61,18 @@ function readSiteMode() {
   }
 }
 
-const RARITY_ORDER = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary', 'Arcane', 'Nameless']
+const STAND_RARITY_ORDER = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary', 'Arcane', 'Nameless']
+const CS2_RARITY_ORDER = [
+  'Consumer Grade',
+  'Industrial Grade',
+  'Mil-Spec Grade',
+  'Restricted',
+  'Classified',
+  'Covert',
+  'Extraordinary',
+  'Contraband',
+]
+let RARITY_ORDER = STAND_RARITY_ORDER
 
 const RARITY = {
   Common: { label: 'Common', ru: 'Обычный', color: '#a7b5aa', glow: 'rgba(167,181,170,.14)' },
@@ -54,6 +82,14 @@ const RARITY = {
   Legendary: { label: 'Legendary', ru: 'Легендарный', color: '#ffc857', glow: 'rgba(255,200,87,.16)' },
   Arcane: { label: 'Arcane', ru: 'Аркан', color: '#ff5d8f', glow: 'rgba(255,93,143,.16)' },
   Nameless: { label: 'Nameless', ru: 'Безымянный', color: '#f6fffb', glow: 'rgba(246,255,251,.2)' },
+  'Consumer Grade': { label: 'Ширпотреб', ru: 'Ширпотреб', color: '#b0c3d9', glow: 'rgba(176,195,217,.14)' },
+  'Industrial Grade': { label: 'Промышленное', ru: 'Промышленное', color: '#5e98d9', glow: 'rgba(94,152,217,.15)' },
+  'Mil-Spec Grade': { label: 'Армейское', ru: 'Армейское', color: '#4b69ff', glow: 'rgba(75,105,255,.17)' },
+  Restricted: { label: 'Запрещённое', ru: 'Запрещённое', color: '#8847ff', glow: 'rgba(136,71,255,.17)' },
+  Classified: { label: 'Засекреченное', ru: 'Засекреченное', color: '#d32ce6', glow: 'rgba(211,44,230,.17)' },
+  Covert: { label: 'Тайное', ru: 'Тайное', color: '#eb4b4b', glow: 'rgba(235,75,75,.17)' },
+  Extraordinary: { label: 'Исключительное', ru: 'Исключительное', color: '#ffd700', glow: 'rgba(255,215,0,.17)' },
+  Contraband: { label: 'Контрабанда', ru: 'Контрабанда', color: '#e4ae39', glow: 'rgba(228,174,57,.17)' },
 }
 
 const ANIM_MS_NORMAL = 3500
@@ -69,6 +105,7 @@ function cx(...parts) {
 }
 
 function formatGold(value, decimals = true) {
+  if (ACTIVE_GAME === 'cs2') return formatCs2Price(value, ACTIVE_CURRENCY)
   const number = Number(value) || 0
   return `${new Intl.NumberFormat('ru-RU', {
     minimumFractionDigits: decimals ? 2 : 0,
@@ -77,6 +114,7 @@ function formatGold(value, decimals = true) {
 }
 
 function formatPrice(value) {
+  if (ACTIVE_GAME === 'cs2') return formatCs2Price(value, ACTIVE_CURRENCY)
   const number = Number(value) || 0
   return `${new Intl.NumberFormat('ru-RU', {
     maximumFractionDigits: 2,
@@ -130,11 +168,20 @@ function saveToken(token) {
   }
 }
 
+const SHARED_API_PATHS = new Set(['/api/login', '/api/register', '/api/health'])
+
+function gameApiPath(path) {
+  if (ACTIVE_GAME !== 'cs2') return path
+  const pathOnly = String(path || '').split('?')[0]
+  if (!path.startsWith('/api/') || SHARED_API_PATHS.has(pathOnly)) return path
+  return `/api/cs2${path.slice(4)}`
+}
+
 async function apiRequest(path, { method = 'GET', body, token } = {}) {
   const headers = { 'Content-Type': 'application/json' }
   if (token) headers.Authorization = `Bearer ${token}`
 
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(`${API_BASE}${gameApiPath(path)}`, {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -791,7 +838,8 @@ function LogoMark({ size = 38, className = '' }) {
   )
 }
 
-function Logo({ compact = false, className = '' }) {
+function Logo({ compact = false, className = '', game = 'stand' }) {
+  const isCs2 = game === 'cs2'
   return (
     <div className={cx('flex items-center gap-2.5', className)}>
       <div className="relative shrink-0">
@@ -800,14 +848,53 @@ function Logo({ compact = false, className = '' }) {
       </div>
       <div className="leading-none">
         <div className="font-display text-[13px] font-extrabold tracking-[-0.03em] text-white sm:text-[15px]">
-          STAND <span className="text-acid">GRADE</span>
+          {isCs2 ? (
+            <>
+              CS2 <span className="text-acid">DROP</span>
+            </>
+          ) : (
+            <>
+              STAND <span className="text-acid">GRADE</span>
+            </>
+          )}
         </div>
         {!compact && (
           <div className="mt-1.5 text-[7px] font-bold uppercase tracking-[0.3em] text-white/30 sm:text-[8px]">
-            Standoff 2 case arena
+            {isCs2 ? 'Counter-Strike 2 case arena' : 'Standoff 2 case arena'}
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function GameSwitch({ game = 'stand', onSwitch, compact = false }) {
+  return (
+    <div className="inline-flex items-center rounded-lg border border-white/[0.08] bg-black/25 p-0.5">
+      <button
+        type="button"
+        onClick={() => onSwitch?.('stand')}
+        className={cx(
+          'rounded-md px-2 py-1 text-[9px] font-black uppercase tracking-[0.1em] transition',
+          game === 'stand'
+            ? 'bg-acid/15 text-acid shadow-[inset_0_0_0_1px_rgba(53,255,135,.18)]'
+            : 'text-white/35 hover:text-white/70',
+        )}
+      >
+        {compact ? 'SG' : 'StandGrade'}
+      </button>
+      <button
+        type="button"
+        onClick={() => onSwitch?.('cs2')}
+        className={cx(
+          'rounded-md px-2 py-1 text-[9px] font-black uppercase tracking-[0.1em] transition',
+          game === 'cs2'
+            ? 'bg-acid/15 text-acid shadow-[inset_0_0_0_1px_rgba(53,255,135,.18)]'
+            : 'text-white/35 hover:text-white/70',
+        )}
+      >
+        {compact ? 'CS2' : 'CS2 Drop'}
+      </button>
     </div>
   )
 }
@@ -980,7 +1067,7 @@ function CaseCrate({ accent = '#35ff87', skin, className = '' }) {
           fill={accent}
           opacity=".82"
         >
-          SG
+          {ACTIVE_GAME === 'cs2' ? 'CS2' : 'SG'}
         </text>
         <path d="M86 46 129 28 182 50" fill="none" stroke="#fff" strokeOpacity=".13" strokeWidth="1.5" />
       </svg>
@@ -1091,6 +1178,9 @@ function Header({
   promoBadge = 0,
   requestBadge = 0,
   activeSection = 'cases',
+  game = 'stand',
+  currency = 'coins',
+  onCurrencyChange,
   onSwitchMode,
   onNavigate,
   onStore,
@@ -1120,20 +1210,20 @@ function Header({
             type="button"
             onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
             className="shrink-0 text-left"
-            aria-label="STAND GRADE — наверх"
+            aria-label={game === 'cs2' ? 'CS2 DROP — наверх' : 'STAND GRADE — наверх'}
           >
             <div className="hidden sm:block">
-              <Logo />
+              <Logo game={game} />
             </div>
             <div className="sm:hidden">
-              <Logo compact />
+              <Logo compact game={game} />
             </div>
           </button>
-          <div className="hidden md:block xl:hidden">
-            <SiteModeSwitch mode="stand" onSwitch={onSwitchMode} compact />
+          <div className="hidden md:block 2xl:hidden">
+            <GameSwitch game={game} onSwitch={onSwitchMode} compact />
           </div>
-          <div className="hidden xl:block">
-            <SiteModeSwitch mode="stand" onSwitch={onSwitchMode} />
+          <div className="hidden 2xl:block">
+            <GameSwitch game={game} onSwitch={onSwitchMode} />
           </div>
         </div>
 
@@ -1245,6 +1335,38 @@ function Header({
           >
             <Icon name={soundOn ? 'volume' : 'volumeOff'} size={16} />
           </button>
+          {game === 'cs2' && (
+            <>
+              <label className="hidden sm:block xl:hidden 2xl:block">
+                <span className="sr-only">Валюта</span>
+                <select
+                  value={currency}
+                  onChange={(event) => onCurrencyChange?.(event.target.value)}
+                  className="h-10 rounded-xl border border-white/[0.08] bg-white/[0.035] px-2 text-[10px] font-extrabold text-white/75 outline-none transition hover:border-acid/30 focus:border-acid/45"
+                >
+                  {CS2_CURRENCIES.map((item) => (
+                    <option key={item.id} value={item.id} className="bg-[#101711]">
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="hidden xl:block 2xl:hidden">
+                <span className="sr-only">Валюта</span>
+                <select
+                  value={currency}
+                  onChange={(event) => onCurrencyChange?.(event.target.value)}
+                  className="h-10 rounded-xl border border-white/[0.08] bg-white/[0.035] px-2 text-[10px] font-extrabold text-white/75 outline-none transition hover:border-acid/30 focus:border-acid/45"
+                >
+                  {CS2_CURRENCIES.map((item) => (
+                    <option key={item.id} value={item.id} className="bg-[#101711]">
+                      {item.short}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </>
+          )}
           <div className="flex h-10 items-center gap-2 rounded-xl border border-acid/15 bg-acid/[0.055] px-2.5 sm:px-3">
             <span className="flex h-5 w-5 items-center justify-center rounded-full bg-acid/12 text-acid ring-1 ring-acid/20">
               <Icon name="coin" size={12} strokeWidth={2.5} />
@@ -1321,16 +1443,32 @@ function Header({
                     </div>
                   </div>
                 </div>
+                {game === 'cs2' && (
+                  <label className="mt-1 flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-[12px] font-bold text-white/60">
+                    <span>Валюта</span>
+                    <select
+                      value={currency}
+                      onChange={(event) => onCurrencyChange?.(event.target.value)}
+                      className="rounded-md border border-white/[0.08] bg-[#101711] px-2 py-1 text-[10px] font-extrabold text-white/75 outline-none"
+                    >
+                      {CS2_CURRENCIES.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.short}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <button
                   type="button"
                   onClick={() => {
                     setMenuOpen(false)
-                    onSwitchMode?.('cs2')
+                    onSwitchMode?.(game === 'cs2' ? 'stand' : 'cs2')
                   }}
-                  className="mt-1 flex w-full items-center gap-2 rounded-lg border border-[#f0a92e]/15 bg-[#f0a92e]/[0.06] px-3 py-2.5 text-left text-[12px] font-bold text-[#ffd08a] transition hover:border-[#f0a92e]/35 hover:bg-[#f0a92e]/[0.1]"
+                  className="mt-1 flex w-full items-center gap-2 rounded-lg border border-acid/15 bg-acid/[0.06] px-3 py-2.5 text-left text-[12px] font-bold text-acid transition hover:border-acid/35 hover:bg-acid/[0.1]"
                 >
                   <Icon name="bolt" size={14} />
-                  CS2 Drop · скины CS2
+                  {game === 'cs2' ? 'В StandGrade' : 'CS2 Drop · скины CS2'}
                 </button>
                 <button
                   type="button"
@@ -1514,7 +1652,7 @@ function CaseCard({ caseData, onOpen, index, user, now }) {
         <div className="absolute right-4 top-4 z-10 rounded-lg border border-white/[0.09] bg-black/25 px-2.5 py-1.5 text-right backdrop-blur">
           <div className="text-[7px] font-bold uppercase tracking-[0.14em] text-white/28">Цена</div>
           <div className="mt-0.5 text-[13px] font-extrabold tabular-nums text-white">
-            {caseData.price === 0 ? '0 G' : formatPrice(caseData.price)}
+            {caseData.price === 0 ? formatPrice(0) : formatPrice(caseData.price)}
           </div>
         </div>
 
@@ -1692,7 +1830,7 @@ function PriceSortControls({
           aria-label="Максимальная цена"
           className="h-full w-11 bg-transparent text-[9px] font-bold tabular-nums text-white placeholder:text-white/22 focus:outline-none"
         />
-        <span className="text-[8px] font-bold text-white/24">G</span>
+        <span className="text-[8px] font-bold text-white/24">{gameUnit()}</span>
       </div>
 
       {(minPrice || maxPrice) && (
@@ -1892,7 +2030,7 @@ function UpgradeShop({ catalog, balance, token, onUpdate, onToast, onBought, onC
                     ) : (
                       <Icon name={affordable ? 'plus' : 'lock'} size={10} />
                     )}
-                    {affordable ? 'Купить' : 'Мало G'}
+                    {affordable ? 'Купить' : `Мало ${gameUnit()}`}
                   </button>
                 </div>
               </div>
@@ -1925,20 +2063,28 @@ function UpgradeShop({ catalog, balance, token, onUpdate, onToast, onBought, onC
   )
 }
 
-function CasesSection({ cases, onOpen, user, now }) {
+function CasesSection({ cases, onOpen, user, now, catalogSize = 0 }) {
   return (
     <section id="cases" className="pt-10 sm:pt-14">
       <SectionHeading
         eyebrow="Case opening"
         title="Выбери свой кейс"
-        description="Чем дороже кейс — тем выше шанс на крупный дроп. У каждого кейса работает «Гарант»: серия без Arcane или ножа постепенно повышает шанс редкого дропа до 100%."
+        description={
+          ACTIVE_GAME === 'cs2'
+            ? 'Кейсы CS2 с честными весами и полным списком дропа. «Гарант» повышает шанс на Classified, Covert, нож или перчатки до 100% при долгой серии без редкого дропа.'
+            : 'Чем дороже кейс — тем выше шанс на крупный дроп. У каждого кейса работает «Гарант»: серия без Arcane или ножа постепенно повышает шанс редкого дропа до 100%.'
+        }
         action={
           <div className="flex items-center gap-2">
             <span className="chip !border-acid/15 !text-acid/65">
               <span className="h-1 w-1 rounded-full bg-acid" />
               {cases.length} {plural(cases.length, ['кейс', 'кейса', 'кейсов'])}
             </span>
-            <span className="hidden chip sm:inline-flex">120 предметов в ленте</span>
+            <span className="hidden chip sm:inline-flex">
+              {ACTIVE_GAME === 'cs2'
+                ? `${catalogSize.toLocaleString('ru-RU')} скинов CS2`
+                : '120 предметов в ленте'}
+            </span>
           </div>
         }
       />
@@ -1989,7 +2135,7 @@ function GlyphCardBack({ deck, className = '' }) {
           {deck?.kicker || 'GLYPH'}
         </div>
         <div className="mt-1 text-[7px] font-black uppercase tracking-[0.24em] text-white/25">
-          Stand Grade · Glyph Card
+          {ACTIVE_GAME === 'cs2' ? 'CS2 Drop · Glyph Card' : 'Stand Grade · Glyph Card'}
         </div>
         <div className="mt-4 flex items-center gap-1.5">
           {[0, 1, 2, 3, 4].map((dot) => (
@@ -2002,7 +2148,7 @@ function GlyphCardBack({ deck, className = '' }) {
         </div>
       </div>
       <span className="absolute left-3 top-3 font-mono text-[7px] font-black tracking-[0.18em] text-white/25">
-        SG
+        {ACTIVE_GAME === 'cs2' ? 'CS2' : 'SG'}
       </span>
       <span className="absolute bottom-3 right-3 font-mono text-[7px] font-black tracking-[0.18em] text-white/20">
         18+
@@ -2207,7 +2353,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
     if (!deck || actionRef.current || busy) return
     const totalPrice = deck.price * openCount
     if (user.balance + 1e-9 < totalPrice) {
-      const message = `Недостаточно G: нужно ${formatPrice(totalPrice)}`
+      const message = `Недостаточно средств: нужно ${formatPrice(totalPrice)}`
       setError(message)
       onToast(message, 'error')
       return
@@ -3844,7 +3990,7 @@ function BattleSection({ cases, user, token, fast, onUpdate, onToast }) {
   async function fight() {
     if (!caseData || duelLocked) return
     if (!canAfford) {
-      onToast('Недостаточно голды для входа в битву', 'error')
+      onToast('Недостаточно средств для входа в битву', 'error')
       return
     }
     unlockAudio()
@@ -4054,7 +4200,7 @@ function BattleSection({ cases, user, token, fast, onUpdate, onToast }) {
               ) : (
                 <>
                   <Icon name="play" size={13} />
-                  {canAfford ? 'В бой' : 'Недостаточно голды'}
+                  {canAfford ? 'В бой' : 'Недостаточно средств'}
                 </>
               )}
             </button>
@@ -4496,7 +4642,7 @@ function PromoSection({ promos, user, token, event, onUpdate, onToast, onNavigat
       <SectionHeading
         eyebrow="PROMO CODES"
         title="Промокоды и зимний ивент"
-        description="Активируй промокод и забери голду или процент к следующему пополнению. Когда владелец добавляет новый код, у вкладки «Промокоды» загорается восклицательный знак."
+        description="Активируй промокод и забери валюту или процент к следующему пополнению. Когда владелец добавляет новый код, у вкладки «Промокоды» загорается восклицательный знак."
       />
 
       {unseen > 0 && (
@@ -4527,7 +4673,7 @@ function PromoSection({ promos, user, token, event, onUpdate, onToast, onNavigat
             <div>
               <div className="text-[10px] font-black uppercase tracking-[0.14em] text-white/70">Активация</div>
               <div className="text-[8px] font-semibold text-white/30">
-                Один промокод — один раз на аккаунт · голда или % к пополнению
+                Один промокод — один раз на аккаунт · валюта или % к пополнению
               </div>
             </div>
           </div>
@@ -4643,7 +4789,7 @@ function PromoSection({ promos, user, token, event, onUpdate, onToast, onNavigat
                 </label>
                 <label className="block">
                   <span className="mb-1 block text-[7px] font-black uppercase tracking-[0.12em] text-white/28">
-                    {promoType === 'deposit_percent' ? 'Процент, %' : 'Награда, G'}
+                    {promoType === 'deposit_percent' ? 'Процент, %' : `Награда, ${gameUnit()}`}
                   </span>
                   <input
                     value={promoType === 'deposit_percent' ? percent : amount}
@@ -5043,7 +5189,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
             <div className="flex flex-wrap items-center gap-2">
               <span className="live-dot h-1.5 w-1.5 rounded-full bg-acid" />
               <span className="text-[9px] font-black uppercase tracking-[0.24em] text-acid/80">
-                Stand Grade · Upgrade Arena
+                {ACTIVE_GAME === 'cs2' ? 'CS2 Drop · Upgrade Arena' : 'Stand Grade · Upgrade Arena'}
               </span>
               <span className="rounded-full border border-lime/20 bg-lime/[0.07] px-2 py-0.5 text-[7px] font-black uppercase tracking-[0.14em] text-lime">
                 дом-эдж 10%
@@ -5053,7 +5199,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
               АПГРЕЙД <span className="text-gradient">СКИНОВ</span>
             </h2>
             <p className="mt-2 max-w-2xl text-[11px] leading-relaxed text-white/40 sm:text-[12px]">
-              Главная арена STAND GRADE: объединяй до {UPGRADE_MAX_ITEMS} скинов и меняй их на более
+              Главная арена {ACTIVE_GAME === 'cs2' ? 'CS2 DROP' : 'STAND GRADE'}: объединяй до {UPGRADE_MAX_ITEMS} скинов и меняй их на более
               дорогой предмет, запускай колесо шанса и забирай профит. Расчёт фиксируется на сервере и не
               подменяется клиентом.
             </p>
@@ -5535,7 +5681,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
 
                     <label className="block">
                       <span className="mb-1 block text-[7px] font-black uppercase tracking-[0.12em] text-white/26">
-                        Доплата из баланса, G
+                        Доплата из баланса, {gameUnit()}
                       </span>
                       <span className="flex gap-1.5">
                         <input
@@ -5815,7 +5961,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
 const INVENTORY_FILTERS = [
   { id: 'all', label: 'Все' },
   { id: 'epic', label: 'Epic+' },
-  { id: 'high', label: '100+ G' },
+  { id: 'high', label: '100+ монет' },
   { id: 'knives', label: 'Ножи' },
 ]
 
@@ -5836,12 +5982,18 @@ function InventorySection({ user, onSell, onSellMany, onWithdraw }) {
     return user.inventory
       .filter((item) => {
         if (item.price < min || item.price > max) return false
-        if (filter === 'epic') return ['Epic', 'Legendary', 'Arcane', 'Nameless'].includes(item.rarity)
+        if (filter === 'epic') {
+          return ACTIVE_GAME === 'cs2'
+            ? ['Classified', 'Covert', 'Extraordinary', 'Contraband'].includes(item.rarity)
+            : ['Epic', 'Legendary', 'Arcane', 'Nameless'].includes(item.rarity)
+        }
         if (filter === 'high') return item.price >= 100
         if (filter === 'knives') {
-          return ['Karambit', 'M9 Bayonet', 'Butterfly Knife', 'Kunai', 'Gloves', 'Flip', 'Mantis', 'Sting'].includes(
-            item.weapon,
-          )
+          return ACTIVE_GAME === 'cs2'
+            ? ['Knives', 'Gloves'].includes(item.category)
+            : ['Karambit', 'M9 Bayonet', 'Butterfly Knife', 'Kunai', 'Gloves', 'Flip', 'Mantis', 'Sting'].includes(
+                item.weapon,
+              )
         }
         return true
       })
@@ -5928,7 +6080,7 @@ function InventorySection({ user, onSell, onSellMany, onWithdraw }) {
       <SectionHeading
         eyebrow="Your inventory"
         title="Инвентарь"
-        description="Выпавшие и купленные скины хранятся здесь. Продай предмет за голду или нажми «Вывести»."
+        description={`Выпавшие и купленные скины хранятся здесь. Продай предмет за ${gameUnit()} или нажми «Вывести».`}
         action={
           <div className="flex flex-wrap items-center gap-2">
             <div className="rounded-xl border border-white/[0.07] bg-white/[0.035] px-3 py-2">
@@ -6240,7 +6392,7 @@ function StorePromo({ catalog, onStore }) {
               Магазин <span className="text-gradient-soft">скинов</span>
             </h2>
             <p className="mt-2 max-w-lg text-[11px] leading-relaxed text-white/38">
-              Купи любой предмет из каталога за голду. Сразу в инвентарь — без ожидания и без реальных платежей.
+              Купи любой предмет из каталога за {gameUnit()}. Сразу в инвентарь — без ожидания и без реальных платежей.
             </p>
             <button type="button" onClick={onStore} className="btn-acid mt-4 !px-5 !py-3 !text-[11px]">
               <Icon name="bag" size={15} />
@@ -6283,11 +6435,11 @@ function Footer({ onHistory, onNavigate, onStore }) {
     <footer className="mt-16 border-t border-white/[0.06] pb-28 pt-8 lg:pb-10">
       <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <Logo />
+          <Logo game={ACTIVE_GAME} />
           <p className="mt-3 max-w-sm text-[9px] leading-relaxed text-white/25">
-            Демонстрационный прототип. Виртуальная голда и скины не имеют реальной стоимости. Реальные платежи,
-            вывод предметов и торговая площадка отключены. Каталог, цены и изображения предметов — публичные данные
-            StandoffCraft.
+            {ACTIVE_GAME === 'cs2'
+              ? 'Демонстрационный CS2-раздел. Виртуальные КС коины и скины не имеют реальной стоимости. Реальные платежи и вывод предметов отключены. Цены, названия и изображения — публичные данные LisSkins и Steam CDN.'
+              : 'Демонстрационный прототип. Виртуальная голда и скины не имеют реальной стоимости. Реальные платежи, вывод предметов и торговая площадка отключены. Каталог, цены и изображения предметов — публичные данные StandoffCraft.'}
           </p>
         </div>
         <div className="grid grid-cols-2 gap-x-10 gap-y-2 text-[9px] font-semibold text-white/28 sm:grid-cols-3">
@@ -6315,8 +6467,12 @@ function Footer({ onHistory, onNavigate, onStore }) {
         </div>
       </div>
       <div className="mt-8 flex flex-col gap-2 border-t border-white/[0.05] pt-4 text-[8px] uppercase tracking-[0.12em] text-white/18 sm:flex-row sm:justify-between">
-        <span>© {new Date().getFullYear()} STAND GRADE — demo build</span>
-        <span>Standoff 2 · все права на игру принадлежат Axlebolt</span>
+        <span>© {new Date().getFullYear()} {ACTIVE_GAME === 'cs2' ? 'CS2 DROP' : 'STAND GRADE'} — demo build</span>
+        <span>
+          {ACTIVE_GAME === 'cs2'
+            ? 'Counter-Strike 2 · все права принадлежат Valve Corporation'
+            : 'Standoff 2 · все права на игру принадлежат Axlebolt'}
+        </span>
       </div>
     </footer>
   )
@@ -6361,7 +6517,8 @@ function ToastStack({ toasts }) {
   )
 }
 
-function BootScreen() {
+function BootScreen({ game = 'stand' }) {
+  const isCs2 = game === 'cs2'
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-ink px-6">
       <div className="absolute inset-0 bg-grid-faint opacity-30" />
@@ -6372,8 +6529,21 @@ function BootScreen() {
           <LogoMark size={66} className="relative" />
         </div>
         <div className="mt-5 font-display text-[16px] font-black tracking-[-0.03em] text-white">
-          STAND <span className="text-acid">GRADE</span>
+          {isCs2 ? (
+            <>
+              CS2 <span className="text-acid">DROP</span>
+            </>
+          ) : (
+            <>
+              STAND <span className="text-acid">GRADE</span>
+            </>
+          )}
         </div>
+        {isCs2 && (
+          <div className="mt-1.5 text-[8px] font-bold uppercase tracking-[0.28em] text-white/25">
+            Counter-Strike 2 case arena
+          </div>
+        )}
         <div className="mt-4 flex items-center gap-2 text-[9px] font-bold uppercase tracking-[0.18em] text-white/30">
           <span className="spin-ring h-3.5 w-3.5 rounded-full border-2 border-acid/20 border-t-acid" />
           Подключаемся к серверу
@@ -7168,7 +7338,7 @@ function CaseModal({
         ? `Открыть ×${effectiveCount} за ${formatPrice(totalPrice)}`
         : canAfford
           ? `Открыть за ${formatPrice(totalPrice)}`
-          : 'Недостаточно голды'
+          : 'Недостаточно средств'
 
   return (
     <div
@@ -7256,7 +7426,7 @@ function CaseModal({
                         )}
                       </div>
                       <p className="mt-1 max-w-[360px] text-[9px] leading-relaxed text-white/32">
-                        Каждое открытие без Arcane или ножа добавляет{' '}
+                        Каждое открытие без {ACTIVE_GAME === 'cs2' ? 'Classified, Covert, ножа или перчаток' : 'Arcane или ножа'} добавляет{' '}
                         <span className="font-bold text-white/55">+1%</span> к шансу редкого дропа. На 30-м
                         открытии бонус уже <span className="font-bold text-white/55">+30%</span>, на 100-м —
                         гарантия.
@@ -8013,7 +8183,7 @@ function StoreModal({ catalog, balance, token, onClose, onUpdate, onToast }) {
                 Магазин скинов
               </h2>
               <div className="mt-0.5 text-[9px] font-semibold text-white/28">
-                {catalog.length} предметов · реальные цены Standoff 2
+                {catalog.length} предметов · реальные цены {ACTIVE_GAME === 'cs2' ? 'CS2' : 'Standoff 2'}
               </div>
             </div>
           </div>
@@ -8136,7 +8306,7 @@ function StoreModal({ catalog, balance, token, onClose, onUpdate, onToast }) {
                           ) : (
                             <Icon name={affordable ? 'plus' : 'lock'} size={11} />
                           )}
-                          {affordable ? 'Купить' : 'Мало G'}
+                          {affordable ? 'Купить' : `Мало ${gameUnit()}`}
                         </button>
                       </div>
                     </div>
@@ -8313,7 +8483,7 @@ function DonateModal({ balance, token, user, daily, event, onClose, onUpdate, on
                   <span className="font-display text-[15px] font-black tracking-[-0.03em] text-white">
                     {new Intl.NumberFormat('ru-RU').format(preset)}
                   </span>
-                  <span className="text-[9px] font-bold text-white/30">G</span>
+                  <span className="text-[9px] font-bold text-white/30">{gameUnit()}</span>
                 </div>
                 <div className="mt-1.5 text-[8px] font-bold uppercase tracking-[0.1em] text-white/22">
                   {preset === 100 ? 'Стартовый' : preset === 500 ? 'Базовый' : preset === 1000 ? 'Плюс' : 'Про'}
@@ -8344,7 +8514,7 @@ function DonateModal({ balance, token, user, daily, event, onClose, onUpdate, on
                 aria-label="Своя сумма пополнения"
                 className="h-11 w-full rounded-xl border border-white/[0.09] bg-black/25 pl-10 pr-10 text-[12px] font-semibold tabular-nums text-white placeholder:text-white/20 transition focus:border-acid/45 focus:bg-black/35 focus:outline-none"
               />
-              <span className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-[10px] font-black text-white/30">G</span>
+              <span className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-[10px] font-black text-white/30">{gameUnit()}</span>
             </div>
             {exceeds && (
               <div className="mt-1.5 text-[8px] font-semibold text-[#ff9aac]">
@@ -8399,7 +8569,7 @@ function DonateModal({ balance, token, user, daily, event, onClose, onUpdate, on
             ) : phase === 'crediting' ? (
               <>
                 <span className="spin-ring h-4 w-4 rounded-full border-2 border-[#041007]/30 border-t-[#041007]" />
-                Зачисляем голду...
+                Зачисляем валюту...
               </>
             ) : amount > 0 ? (
               <>
@@ -8422,7 +8592,7 @@ function DonateModal({ balance, token, user, daily, event, onClose, onUpdate, on
           <div className="mt-3 flex items-start gap-2 rounded-xl border border-[#ffc857]/15 bg-[#ffc857]/[0.04] p-3 text-[8px] leading-relaxed text-[#ffda8a]/65">
             <Icon name="info" size={12} className="mt-0.5 shrink-0" />
             Демо-режим: реальные платежи не проводятся. После нажатия «Пополнить» мы имитируем проверку платежа
-            (1.5–2 сек) и зачисляем голду{unlimited ? ' без дневного лимита.' : ', если дневной лимит не превышен.'}
+            (1.5–2 сек) и зачисляем валюту{unlimited ? ' без дневного лимита.' : ', если дневной лимит не превышен.'}
           </div>
         </div>
       </div>
@@ -8619,10 +8789,10 @@ function ApplicationsSection({ applications, user, token, onUpdate, onToast }) {
         title="Центр заявок"
         description={
           isOwner
-            ? 'Заявки на админку, голду и промокоды. Одобряй или отклоняй — изменения сразу применяются.'
+            ? 'Заявки на админку, валюту и промокоды. Одобряй или отклоняй — изменения сразу применяются.'
             : isAdmin
               ? 'Отправь владельцу заявку на создание промокода и следи за статусом.'
-              : 'Заявка на админку и запрос голды после исчерпания дневного лимита — всё здесь.'
+              : 'Заявка на админку и запрос валюты после исчерпания дневного лимита — всё здесь.'
         }
       />
 
@@ -8918,7 +9088,7 @@ function ApplicationsSection({ applications, user, token, onUpdate, onToast }) {
                 </span>
                 <div>
                   <div className="text-[10px] font-black uppercase tracking-[0.14em] text-white/70">
-                    Заявка на голду
+                    Заявка на валюту
                   </div>
                   <div className="text-[8px] font-semibold text-white/30">
                     Доступна после исчерпания дневного лимита
@@ -8948,7 +9118,7 @@ function ApplicationsSection({ applications, user, token, onUpdate, onToast }) {
                 <>
                   <label className="relative mt-3 block">
                     <span className="mb-1 block text-[7px] font-black uppercase tracking-[0.12em] text-white/28">
-                      Сколько голды нужно
+                      Сколько валюты нужно
                     </span>
                     <input
                       value={goldAmount}
@@ -8972,7 +9142,7 @@ function ApplicationsSection({ applications, user, token, onUpdate, onToast }) {
                 </>
               ) : (
                 <div className="relative mt-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-[9px] leading-relaxed text-white/35">
-                  У вас уже есть активная заявка на голду.
+                  У вас уже есть активная заявка на валюту.
                 </div>
               )}
             </div>
@@ -9043,7 +9213,7 @@ function ApplicationsSection({ applications, user, token, onUpdate, onToast }) {
                     </label>
                     <label className="block">
                       <span className="mb-1 block text-[7px] font-black uppercase tracking-[0.12em] text-white/28">
-                        {promoType === 'deposit_percent' ? 'Процент, %' : 'Награда, G'}
+                        {promoType === 'deposit_percent' ? 'Процент, %' : `Награда, ${gameUnit()}`}
                       </span>
                       <input
                         value={promoType === 'deposit_percent' ? promoPercent : promoAmount}
@@ -9455,7 +9625,7 @@ function WithdrawModal({ skin, onClose }) {
           </div>
 
           <div className="mt-4 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 text-[8px] leading-relaxed text-white/27">
-            Предмет останется в вашем инвентаре. Его можно продать за голду или использовать в апгрейде.
+            Предмет останется в вашем инвентаре. Его можно продать за валюту или использовать в апгрейде.
           </div>
 
           <button type="button" onClick={onClose} className="btn-acid mt-4 w-full !py-3">
@@ -9936,6 +10106,7 @@ export default function App() {
   const [donateOpen, setDonateOpen] = useState(false)
   const [activeSection, setActiveSection] = useState(readSectionFromHash)
   const [siteMode, setSiteMode] = useState(readSiteMode)
+  const [cs2Currency, setCs2Currency] = useState(readCs2Currency)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [withdrawSkin, setWithdrawSkin] = useState(null)
   const [online, setOnline] = useState(1)
@@ -9950,15 +10121,23 @@ export default function App() {
   const toastIdRef = useRef(0)
   const lastUnseenRef = useRef(0)
   const now = useNow()
+  const displayGame = token ? siteMode : 'stand'
+
+  ACTIVE_GAME = displayGame
+  ACTIVE_CURRENCY = cs2Currency
+  RARITY_ORDER = displayGame === 'cs2' ? CS2_RARITY_ORDER : STAND_RARITY_ORDER
 
   useEffect(() => {
     try {
       localStorage.setItem(SITE_MODE_KEY, siteMode)
+      localStorage.setItem(CS2_CURRENCY_KEY, cs2Currency)
     } catch {
       /* localStorage may be unavailable */
     }
-    document.title = SITE_TITLES[siteMode] || SITE_TITLES.stand
-  }, [siteMode])
+    document.title = SITE_TITLES[displayGame] || SITE_TITLES.stand
+    document.body.classList.toggle('cs2-mode', displayGame === 'cs2')
+    return () => document.body.classList.remove('cs2-mode')
+  }, [siteMode, cs2Currency, displayGame])
 
   // Разблокируем Web Audio на первом же жесте пользователя.
   // Иначе первый звук после async-запроса может остаться в suspended-контексте.
@@ -9992,6 +10171,7 @@ export default function App() {
     }
 
     let cancelled = false
+    ACTIVE_GAME = siteMode
     setBooting(true)
     apiRequest('/api/status', { token })
       .then((data) => {
@@ -10021,7 +10201,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [token, pushToast])
+  }, [token, siteMode, pushToast])
 
   useEffect(() => {
     if (!token) return undefined
@@ -10064,7 +10244,7 @@ export default function App() {
       cancelled = true
       clearInterval(interval)
     }
-  }, [token])
+  }, [token, siteMode])
 
   const unseenPromos = Number(status?.promos?.unseenCount) || 0
 
@@ -10259,7 +10439,26 @@ export default function App() {
     setHistoryOpen(true)
   }
 
-  if (booting) return <BootScreen />
+  function switchGame(next) {
+    if (!next || next === siteMode) return
+    setActiveCase(null)
+    setStoreOpen(false)
+    setDonateOpen(false)
+    setHistoryOpen(false)
+    setWithdrawSkin(null)
+    setActiveSection('cases')
+    setStatus(null)
+    setBooting(true)
+    setSiteMode(next)
+    window.scrollTo({ top: 0, behavior: 'auto' })
+  }
+
+  function logout() {
+    setSiteMode('stand')
+    handleLogout()
+  }
+
+  if (booting) return <BootScreen game={displayGame} />
 
   if (!token || !status) {
     return (
@@ -10277,21 +10476,6 @@ export default function App() {
   const catalog = status.catalog || []
   const requestBadge =
     user.role === 'owner' ? Number(status.applications?.pendingCount) || 0 : 0
-
-  if (siteMode === 'cs2') {
-    return (
-      <CS2DropApp
-        username={user.username}
-        onSwitchMode={(mode) => {
-          if (mode === 'stand') setSiteMode('stand')
-        }}
-        onLogout={() => {
-          setSiteMode('stand')
-          handleLogout()
-        }}
-      />
-    )
-  }
 
   return (
     <div key={user.id} className="relative min-h-screen overflow-x-hidden">
@@ -10315,14 +10499,17 @@ export default function App() {
         promoBadge={unseenPromos}
         requestBadge={requestBadge}
         activeSection={activeSection}
-        onSwitchMode={setSiteMode}
+        game={siteMode}
+        currency={cs2Currency}
+        onCurrencyChange={(value) => setCs2Currency(value)}
+        onSwitchMode={switchGame}
         onNavigate={navigate}
         onStore={goStore}
         onDonate={() => setDonateOpen(true)}
         onHistory={goHistory}
         onSettings={() => navigate('settings')}
         onToggleSound={toggleSound}
-        onLogout={handleLogout}
+        onLogout={logout}
       />
       {status.event?.active && <WinterEventBar event={status.event} onNavigate={navigate} />}
 
@@ -10342,7 +10529,7 @@ export default function App() {
 
           {activeSection === 'cases' && (
             <>
-              <CasesSection cases={cases} onOpen={openCase} user={user} now={now} />
+              <CasesSection cases={cases} onOpen={openCase} user={user} now={now} catalogSize={catalog.length} />
               <StorePromo catalog={catalog} onStore={goStore} />
             </>
           )}

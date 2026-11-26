@@ -675,13 +675,13 @@ select:focus-visible {
 
 body.cs2-mode {
   background:
-    radial-gradient(circle at 12% -8%, rgba(74, 168, 255, 0.11), transparent 34rem),
-    radial-gradient(circle at 92% 2%, rgba(240, 169, 46, 0.09), transparent 32rem),
-    #06080c;
+    radial-gradient(circle at 12% -8%, rgba(53, 255, 135, 0.12), transparent 32rem),
+    radial-gradient(circle at 92% 2%, rgba(204, 255, 51, 0.07), transparent 30rem),
+    #070b08;
 }
 
 body.cs2-mode ::selection {
-  background: rgba(240, 169, 46, 0.32);
+  background: rgba(53, 255, 135, 0.32);
   color: #fff;
 }
 
@@ -689,16 +689,16 @@ body.cs2-mode button:focus-visible,
 body.cs2-mode a:focus-visible,
 body.cs2-mode input:focus-visible,
 body.cs2-mode select:focus-visible {
-  outline-color: rgba(240, 169, 46, 0.8);
+  outline-color: rgba(53, 255, 135, 0.85);
 }
 
 body.cs2-mode ::-webkit-scrollbar-track {
-  background: #070b10;
+  background: #090e0a;
 }
 
 body.cs2-mode ::-webkit-scrollbar-thumb {
-  background: #263140;
-  border-color: #070b10;
+  background: #26342b;
+  border-color: #090e0a;
 }
 
 .cs2-shell {

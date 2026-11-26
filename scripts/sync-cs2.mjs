@@ -99,12 +99,18 @@ for (const entry of by) {
   }
 }
 
+const usedIds = new Map()
 const items = [...groups.values()]
-  .map((item, index) => ({
-    id: `cs2-${item.stattrak ? 'st-' : ''}${item.souvenir ? 'sv-' : ''}${slugify(item.name) || 'skin'}-${index}`,
-    ...item,
-    priceCoins: Math.max(1, Math.round(item.priceUsd * 100)),
-  }))
+  .map((item) => {
+    const baseId = `cs2-${item.stattrak ? 'st-' : ''}${item.souvenir ? 'sv-' : ''}${slugify(item.name) || 'skin'}`
+    const seen = usedIds.get(baseId) || 0
+    usedIds.set(baseId, seen + 1)
+    return {
+      id: seen ? `${baseId}-${seen + 1}` : baseId,
+      ...item,
+      priceCoins: Math.max(1, Math.round(item.priceUsd * 100)),
+    }
+  })
   .sort((a, b) => a.priceCoins - b.priceCoins)
 
 const byCategory = {}

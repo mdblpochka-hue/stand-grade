@@ -5,6 +5,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import pg from 'pg'
 import { STANDOFFCRAFT_META, STANDOFFCRAFT_SKINS } from './server-data/standoffcraft.js'
+import { buildCs2Cases } from './src/cs2/cases.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -43,6 +44,8 @@ const DATA_DIR = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
   : path.join(__dirname, 'data')
 const DB_PATH = path.join(DATA_DIR, 'store.json')
+const CS2_DB_PATH = path.join(DATA_DIR, 'store-cs2.json')
+const CS2_CATALOG_PATH = path.join(__dirname, 'public', 'cs2', 'catalog.json')
 const SECRET_PATH = path.join(DATA_DIR, 'session.secret')
 
 // Необязательная внешняя БД. На бесплатном Render файловая система
@@ -73,6 +76,13 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'rainy'
 const ADMIN_START_BALANCE = Number(process.env.ADMIN_START_BALANCE || 100000)
 // Регистрация: стартовый баланс и лимит аккаунтов на одного человека.
 const REGISTER_START_BALANCE = Number(process.env.REGISTER_START_BALANCE || 100)
+const CS2_START_BALANCE = Number(process.env.CS2_START_BALANCE || 10000)
+const CS2_OWNER_START_BALANCE = Number(process.env.CS2_OWNER_START_BALANCE || 1000000)
+const CS2_ADMIN_START_BALANCE = Number(process.env.CS2_ADMIN_START_BALANCE || 250000)
+const CS2_GLYPH_BANK_START = Math.max(
+  0,
+  Number(process.env.CS2_GLYPH_BANK_START) || 1000000,
+)
 const MAX_ACCOUNTS_PER_PERSON = Number(process.env.MAX_ACCOUNTS_PER_PERSON || 2)
 const DEVICE_COOKIE = 'sg_device'
 const DEVICE_COOKIE_MAX_AGE = 365 * 24 * 60 * 60
@@ -178,7 +188,18 @@ const BATTLE_NAMES = [
   'LilBomzh',
   'Frosty',
 ]
-const RARITY_ORDER = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary', 'Arcane', 'Nameless']
+const STAND_RARITY_ORDER = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary', 'Arcane', 'Nameless']
+const CS2_RARITY_ORDER = [
+  'Consumer Grade',
+  'Industrial Grade',
+  'Mil-Spec Grade',
+  'Restricted',
+  'Classified',
+  'Covert',
+  'Extraordinary',
+  'Contraband',
+]
+let RARITY_ORDER = STAND_RARITY_ORDER
 
 fs.mkdirSync(DATA_DIR, { recursive: true })
 
@@ -341,7 +362,8 @@ const LEGACY_SKINS = [
 ]
 
 const REAL_SKINS = STANDOFFCRAFT_SKINS
-const SKINS = REAL_SKINS
+const STAND_SKINS = REAL_SKINS
+let SKINS = STAND_SKINS
 
 function normalizeSkinName(value) {
   return String(value || '')
@@ -350,7 +372,8 @@ function normalizeSkinName(value) {
     .trim()
 }
 
-const SKIN_BY_ID = new Map([...LEGACY_SKINS, ...REAL_SKINS].map((skin) => [skin.id, skin]))
+const STAND_SKIN_BY_ID = new Map([...LEGACY_SKINS, ...REAL_SKINS].map((skin) => [skin.id, skin]))
+let SKIN_BY_ID = STAND_SKIN_BY_ID
 const REAL_BY_NAME = new Map(REAL_SKINS.map((skin) => [normalizeSkinName(skin.name), skin]))
 
 // Старые предметы с тем же названием автоматически становятся реальными
@@ -543,7 +566,7 @@ const GLYPH_TAIL_AMP = 0.02
 const GLYPH_POOL_TARGET_RTP = 0.82
 const GLYPH_POOL_MIN_RATIO = 1 / 20
 
-function makeGlyphPool(price) {
+function makeGlyphPool(price, skins = SKINS) {
   const loss = []
   const mid = []
   const tail = []
@@ -551,7 +574,7 @@ function makeGlyphPool(price) {
   let midMass = 0
   let tailShape = 0
 
-  for (const skin of SKINS) {
+  for (const skin of skins) {
     const ratio = skin.price / price
     if (!Number.isFinite(ratio) || ratio < GLYPH_POOL_MIN_RATIO) continue
     if (ratio < 1) {
@@ -878,7 +901,7 @@ const CASE_DEFS = [
 
 CASE_DEFS.sort((a, b) => a.price - b.price)
 
-const CASES = CASE_DEFS.map((definition) => {
+const STAND_CASES = CASE_DEFS.map((definition) => {
   const { weights, ...rest } = definition
   const pool = rest.price > 0 ? makeRatioPool(rest.price) : makePool(weights, { maxPrice: 5000 })
   const mappedFeatured = LEGACY_SKIN_MAP.get(rest.featuredSkinId) || rest.featuredSkinId
@@ -887,13 +910,24 @@ const CASES = CASE_DEFS.map((definition) => {
     : [...pool].sort((a, b) => b[1] - a[1])[0]?.[0] || null
   return { ...rest, featuredSkinId, pool }
 })
-const CASE_BY_ID = new Map(CASES.map((item) => [item.id, item]))
+const STAND_CASE_BY_ID = new Map(STAND_CASES.map((item) => [item.id, item]))
+let CASES = STAND_CASES
+let CASE_BY_ID = STAND_CASE_BY_ID
 
 const KNIFE_PATTERN = /(karambit|bayonet|butterfly|flip|kunai|sting|mantis|dual daggers)/i
-function isRareSkin(skin) {
+function standIsRareSkin(skin) {
   if (!skin) return false
   return skin.rarity === 'Arcane' || skin.rarity === 'Nameless' || KNIFE_PATTERN.test(skin.weapon)
 }
+function cs2IsRareSkin(skin) {
+  if (!skin) return false
+  return (
+    skin.category === 'Knives' ||
+    skin.category === 'Gloves' ||
+    ['Classified', 'Covert', 'Extraordinary', 'Contraband'].includes(skin.rarity)
+  )
+}
+let isRareSkin = standIsRareSkin
 
 const rarePoolCache = new Map()
 const normalPoolCache = new Map()
@@ -918,18 +952,30 @@ function getNormalPool(config) {
   return normalPoolCache.get(config.id)
 }
 
-function buildCasePayload(config) {
+function buildCasePayload(
+  config,
+  {
+    skinById = SKIN_BY_ID,
+    rarityOrder = RARITY_ORDER,
+    isRare = isRareSkin,
+    showcaseLimit = 80,
+    commonLimit = 60,
+    expensiveLimit = 10,
+  } = {},
+) {
   const totalWeight = config.pool.reduce((sum, [, weight]) => sum + weight, 0)
   const fullContents = config.pool
     .map(([skinId, weight]) => {
-      const skin = SKIN_BY_ID.get(skinId)
+      const skin = skinById.get(skinId)
+      if (!skin) return null
       return {
         ...skin,
         weight,
         chance: (weight / totalWeight) * 100,
-        rare: isRareSkin(skin),
+        rare: isRare(skin),
       }
     })
+    .filter(Boolean)
     .sort((a, b) => b.price - a.price)
 
   /*
@@ -940,17 +986,17 @@ function buildCasePayload(config) {
    */
   const showcase = new Map()
   const byChance = [...fullContents].sort((a, b) => b.chance - a.chance)
-  for (const item of byChance.slice(0, 60)) showcase.set(item.id, item)
-  for (const item of fullContents.slice(0, 10)) showcase.set(item.id, item)
+  for (const item of byChance.slice(0, commonLimit)) showcase.set(item.id, item)
+  for (const item of fullContents.slice(0, expensiveLimit)) showcase.set(item.id, item)
   if (config.featuredSkinId) {
     const featured = fullContents.find((item) => item.id === config.featuredSkinId)
     if (featured) showcase.set(featured.id, featured)
   }
   const contents = [...showcase.values()]
     .sort((a, b) => b.price - a.price)
-    .slice(0, 80)
+    .slice(0, showcaseLimit)
 
-  const rarityBreakdown = RARITY_ORDER.map((rarity) => {
+  const rarityBreakdown = rarityOrder.map((rarity) => {
     const chance = fullContents
       .filter((item) => item.rarity === rarity)
       .reduce((sum, item) => sum + item.chance, 0)
@@ -973,7 +1019,8 @@ function buildCasePayload(config) {
   }
 }
 
-const CASE_PAYLOADS = CASES.map(buildCasePayload)
+const STAND_CASE_PAYLOADS = STAND_CASES.map(buildCasePayload)
+let CASE_PAYLOADS = STAND_CASE_PAYLOADS
 
 /* ------------------------------------------------------------------ */
 /*  Glyph decks (card packs)                                          */
@@ -1054,7 +1101,7 @@ const GLYPH_DECKS = [
   },
 ]
 
-const GLYPHS = GLYPH_DECKS.map((deck) => {
+const STAND_GLYPHS = GLYPH_DECKS.map((deck) => {
   const pool = makeGlyphPool(deck.price)
   const payload = buildCasePayload({ ...deck, pool })
   const maxFeaturedPrice = deck.price * 20
@@ -1078,8 +1125,127 @@ const GLYPHS = GLYPH_DECKS.map((deck) => {
     payload: { ...payload, featuredSkin, contents: payload.contents.slice(0, 18) },
   }
 })
-const GLYPH_BY_ID = new Map(GLYPHS.map((deck) => [deck.id, deck]))
-const GLYPH_PAYLOADS = GLYPHS.map((deck) => deck.payload)
+const STAND_GLYPH_BY_ID = new Map(STAND_GLYPHS.map((deck) => [deck.id, deck]))
+const STAND_GLYPH_PAYLOADS = STAND_GLYPHS.map((deck) => deck.payload)
+let GLYPHS = STAND_GLYPHS
+let GLYPH_BY_ID = STAND_GLYPH_BY_ID
+let GLYPH_PAYLOADS = STAND_GLYPH_PAYLOADS
+
+/* ------------------------------------------------------------------ */
+/*  CS2 game data (separate catalog, cases, glyph decks)               */
+/* ------------------------------------------------------------------ */
+
+function loadCs2Skins() {
+  try {
+    const payload = JSON.parse(fs.readFileSync(CS2_CATALOG_PATH, 'utf8'))
+    const items = Array.isArray(payload) ? payload : payload?.items
+    if (!Array.isArray(items) || !items.length) throw new Error('empty catalog')
+    return items.map((item) => ({
+      id: item.id,
+      name: item.name,
+      baseName: item.name,
+      weapon: item.weapon || '',
+      rarity: item.rarity || 'Consumer Grade',
+      price: Math.max(1, Math.round(Number(item.priceCoins) || 0)),
+      priceCoins: Math.max(1, Math.round(Number(item.priceCoins) || 0)),
+      image: item.image || '',
+      isStatTrak: Boolean(item.stattrak),
+      isSouvenir: Boolean(item.souvenir),
+      collection: 'CS2',
+      category: item.category || '',
+      wear: item.wear || '',
+      rarityColor: item.rarityColor || '#b0c3d9',
+    }))
+  } catch (error) {
+    console.warn(`CS2 catalog unavailable: ${error.message}`)
+    return []
+  }
+}
+
+const CS2_SKINS = loadCs2Skins()
+const CS2_SKIN_BY_ID = new Map(CS2_SKINS.map((skin) => [skin.id, skin]))
+const CS2_CASE_KICKERS = {
+  farm: 'FARM DROP',
+  knife: 'KNIFE CASE',
+  glove: 'GLOVE CASE',
+  weapon: 'WEAPON CASE',
+  rarity: 'RARITY CASE',
+  free: 'FREE DAILY',
+}
+const CS2_SKINS_BY_PRICE = [...CS2_SKINS].sort(
+  (a, b) => a.price - b.price || String(a.id).localeCompare(String(b.id)),
+)
+const CS2_CONTEXT = {
+  skins: CS2_SKINS,
+  skinById: CS2_SKIN_BY_ID,
+  rarityOrder: CS2_RARITY_ORDER,
+  isRare: cs2IsRareSkin,
+  showcaseLimit: 56,
+  commonLimit: 42,
+  expensiveLimit: 8,
+}
+
+const CS2_CASES = CS2_SKINS.length
+  ? buildCs2Cases(CS2_SKINS).map((caseData) => ({
+      id: caseData.id,
+      name: caseData.name,
+      subtitle: caseData.subtitle,
+      kicker: CS2_CASE_KICKERS[caseData.category] || 'CS2 DROP',
+      price: Math.max(0, Math.round(Number(caseData.priceCoins) || 0)),
+      accent: caseData.accent || '#35ff87',
+      featuredSkinId: caseData.featured?.id || null,
+      pool: caseData.pool.map((entry) => [
+        entry.skin.id,
+        Math.max(1, Math.round(entry.chance * 1_000_000)),
+      ]),
+    }))
+  : []
+const CS2_CASE_BY_ID = new Map(CS2_CASES.map((item) => [item.id, item]))
+const CS2_CASE_PAYLOADS = CS2_CASES.map((config) =>
+  buildCasePayload(config, CS2_CONTEXT),
+)
+
+function buildCs2GlyphDeck(deck) {
+  const pool = makeGlyphPool(deck.price, CS2_SKINS)
+  const payload = buildCasePayload(
+    { ...deck, featuredSkinId: null, pool },
+    CS2_CONTEXT,
+  )
+  const maxFeaturedPrice = deck.price * 20
+  const candidates = pool
+    .map(([skinId]) => CS2_SKIN_BY_ID.get(skinId))
+    .filter(
+      (skin) =>
+        skin &&
+        skin.price >= deck.price * 1.5 &&
+        skin.price <= maxFeaturedPrice,
+    )
+    .sort((a, b) => b.price - a.price)
+  const featuredSkin =
+    candidates[0] ||
+    payload.contents.find((skin) => skin.price <= maxFeaturedPrice) ||
+    payload.contents[0] ||
+    null
+  return {
+    ...deck,
+    pool,
+    payload: { ...payload, featuredSkin, contents: payload.contents.slice(0, 18) },
+  }
+}
+
+const CS2_GLYPH_DECKS = [
+  { id: 'spark', name: 'Искра', subtitle: 'Печать первого шанса', kicker: 'SPARK SEAL', price: 100, accent: '#8dff6a' },
+  { id: 'ash', name: 'Пепел', subtitle: 'Тлеющий тир', kicker: 'ASH SEAL', price: 300, accent: '#b8b8b8' },
+  { id: 'azure', name: 'Лазурь', subtitle: 'Синий диапазон', kicker: 'AZURE SEAL', price: 700, accent: '#58cfff' },
+  { id: 'mirage', name: 'Мираж', subtitle: 'Иллюзия редкого дропа', kicker: 'MIRAGE SEAL', price: 1500, accent: '#c08bff' },
+  { id: 'eclipse', name: 'Затмение', subtitle: 'Тёмная сторона удачи', kicker: 'ECLIPSE SEAL', price: 3000, accent: '#ffcf4d' },
+  { id: 'aurora', name: 'Аврора', subtitle: 'Печать северного света', kicker: 'AURORA SEAL', price: 6000, accent: '#5effc9' },
+  { id: 'singularity', name: 'Сингулярность', subtitle: 'Предел вероятности', kicker: 'SINGULARITY', price: 12000, accent: '#ff7ad9' },
+  { id: 'abyss', name: 'Бездна', subtitle: 'Последняя печать', kicker: 'ABYSS SEAL', price: 25000, accent: '#f3fff6' },
+]
+const CS2_GLYPHS = CS2_SKINS.length ? CS2_GLYPH_DECKS.map(buildCs2GlyphDeck) : []
+const CS2_GLYPH_BY_ID = new Map(CS2_GLYPHS.map((deck) => [deck.id, deck]))
+const CS2_GLYPH_PAYLOADS = CS2_GLYPHS.map((deck) => deck.payload)
 
 function weightedPickFrom(pool) {
   const total = pool.reduce((sum, [, weight]) => sum + weight, 0)
@@ -1285,7 +1451,130 @@ function defaultState() {
   }
 }
 
-function migrateUser(user) {
+function makeCs2UserFrom(baseUser) {
+  const roleStart =
+    baseUser.role === 'owner'
+      ? CS2_OWNER_START_BALANCE
+      : baseUser.role === 'admin'
+        ? CS2_ADMIN_START_BALANCE
+        : CS2_START_BALANCE
+  return {
+    id: baseUser.id,
+    username: baseUser.username,
+    role: baseUser.role,
+    tokenVersion: Math.max(0, Math.trunc(Number(baseUser.tokenVersion) || 0)),
+    salt: baseUser.salt,
+    passwordHash: baseUser.passwordHash,
+    balance: Math.max(0, Math.round(roleStart)),
+    inventory: [],
+    pity: {},
+    lastFreeCaseAt: null,
+    history: emptyHistory(),
+    activatedPromos: [],
+    promoSeenAt: null,
+    depositBoost: null,
+    glyphDrop: null,
+    createdAt: baseUser.createdAt || new Date().toISOString(),
+  }
+}
+
+function defaultCs2Promos() {
+  return [
+    makePromo('CS2WELCOME', { amount: 500, maxUses: 5000, createdBy: 'cs2-drop' }),
+  ]
+}
+
+function defaultCs2State() {
+  const users = {}
+  if (typeof standState !== 'undefined' && standState?.users) {
+    for (const baseUser of Object.values(standState.users)) {
+      users[baseUser.id] = makeCs2UserFrom(baseUser)
+    }
+  }
+  return {
+    version: 3,
+    dayKey: null,
+    dailyDistributed: 0,
+    glyphBank: CS2_GLYPH_BANK_START,
+    users,
+    promos: defaultCs2Promos(),
+    applications: [],
+    registrationIps: {},
+    registrationDevices: {},
+  }
+}
+
+function normalizeCs2State(parsed) {
+  if (typeof parsed === 'string') {
+    try {
+      parsed = JSON.parse(parsed)
+    } catch {
+      return defaultCs2State()
+    }
+  }
+  if (!parsed || typeof parsed !== 'object' || !parsed.users) return defaultCs2State()
+  Object.values(parsed.users).forEach((user) => migrateUser(user, CS2_SKIN_BY_ID))
+  if (!Array.isArray(parsed.promos)) parsed.promos = defaultCs2Promos()
+  if (!Array.isArray(parsed.applications)) parsed.applications = []
+  parsed.applications = parsed.applications
+    .filter((application) => application && typeof application === 'object' && application.id && application.type)
+    .slice(0, APPLICATION_HISTORY_LIMIT)
+  if (!parsed.registrationIps || typeof parsed.registrationIps !== 'object') parsed.registrationIps = {}
+  if (!parsed.registrationDevices || typeof parsed.registrationDevices !== 'object') {
+    parsed.registrationDevices = {}
+  }
+  parsed.dailyDistributed = Number(parsed.dailyDistributed) || 0
+  parsed.glyphBank = Number.isFinite(Number(parsed.glyphBank))
+    ? Math.max(0, Number(parsed.glyphBank))
+    : CS2_GLYPH_BANK_START
+  parsed.version = 3
+  return parsed
+}
+
+const CS2_AUTH_FIELDS = [
+  'username',
+  'role',
+  'salt',
+  'passwordHash',
+  'tokenVersion',
+  'disabled',
+  'disabledReason',
+  'banned',
+  'banReason',
+  'bannedAt',
+  'passwordChangedAt',
+  'createdAt',
+]
+
+function syncCs2Accounts() {
+  if (!standState?.users) return
+  for (const baseUser of Object.values(standState.users)) {
+    let target = cs2State.users[baseUser.id]
+    if (!target) {
+      target = makeCs2UserFrom(baseUser)
+      cs2State.users[baseUser.id] = target
+    }
+    for (const field of CS2_AUTH_FIELDS) {
+      if (baseUser[field] === undefined) delete target[field]
+      else target[field] = baseUser[field]
+    }
+  }
+}
+
+function syncCs2AuthBack() {
+  if (!cs2State?.users || !standState?.users) return
+  for (const target of Object.values(cs2State.users)) {
+    const baseUser = standState.users[target.id]
+    if (!baseUser) continue
+    for (const field of CS2_AUTH_FIELDS) {
+      if (field === 'createdAt') continue
+      if (target[field] === undefined) delete baseUser[field]
+      else baseUser[field] = target[field]
+    }
+  }
+}
+
+function migrateUser(user, skinById = SKIN_BY_ID) {
   user.tokenVersion = Math.max(0, Math.trunc(Number(user.tokenVersion) || 0))
   if (!('glyphDrop' in user)) user.glyphDrop = null
   if (user.glyphDrop) {
@@ -1343,7 +1632,9 @@ function migrateUser(user) {
   if (!Array.isArray(user.inventory)) user.inventory = []
   user.inventory = user.inventory
     .map((entry) => {
-      const skinId = resolveSkinId(entry.skinId)
+      if (!entry || !entry.skinId) return null
+      if (skinById.has(entry.skinId)) return entry
+      const skinId = skinById === STAND_SKIN_BY_ID ? resolveSkinId(entry.skinId) : null
       return skinId ? { ...entry, skinId } : null
     })
     .filter(Boolean)
@@ -1358,8 +1649,10 @@ function migrateUser(user) {
   if (!user.promoSeenAt) user.promoSeenAt = null
   if (!user.depositBoost || typeof user.depositBoost !== 'object') user.depositBoost = null
   user.history.cases = user.history.cases.map((entry) => {
-    const skinId = entry.skin?.id ? resolveSkinId(entry.skin.id) : null
-    return skinId ? { ...entry, skin: SKIN_BY_ID.get(skinId) } : entry
+    if (!entry?.skin?.id) return entry
+    if (skinById.has(entry.skin.id)) return { ...entry, skin: skinById.get(entry.skin.id) }
+    const skinId = skinById === STAND_SKIN_BY_ID ? resolveSkinId(entry.skin.id) : null
+    return skinId ? { ...entry, skin: skinById.get(skinId) } : entry
   })
   return user
 }
@@ -1417,76 +1710,150 @@ function loadState() {
   }
 }
 
-const REMOTE_TABLE = 'stand_grade_state'
+function loadCs2LocalState() {
+  try {
+    return normalizeCs2State(JSON.parse(fs.readFileSync(CS2_DB_PATH, 'utf8')))
+  } catch {
+    return null
+  }
+}
 
-async function loadRemoteState() {
+const REMOTE_TABLE = 'stand_grade_state'
+const CS2_REMOTE_TABLE = 'stand_grade_cs2_state'
+
+async function loadRemoteState(table = REMOTE_TABLE) {
   if (!dbPool) return null
   await dbPool.query(`
-    CREATE TABLE IF NOT EXISTS ${REMOTE_TABLE} (
+    CREATE TABLE IF NOT EXISTS ${table} (
       id SMALLINT PRIMARY KEY,
       data JSONB NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `)
-  const result = await dbPool.query(`SELECT data FROM ${REMOTE_TABLE} WHERE id = 1`)
+  const result = await dbPool.query(`SELECT data FROM ${table} WHERE id = 1`)
   return result.rows[0]?.data || null
 }
 
-async function saveRemoteState(snapshot) {
+async function saveRemoteState(table, snapshot) {
   if (!dbPool) return
   await dbPool.query(
-    `INSERT INTO ${REMOTE_TABLE} (id, data, updated_at)
+    `INSERT INTO ${table} (id, data, updated_at)
      VALUES (1, $1::jsonb, now())
      ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
     [snapshot],
   )
 }
 
-let state
+let standState = defaultState()
+let cs2State = null
+let state = standState
+let activeGame = 'stand'
+
 if (dbPool) {
-  const remote = await loadRemoteState()
-  // Если БД пустая, берём локальный store.json (удобно для миграции),
-  // иначе — данные из PostgreSQL.
-  state = remote?.users ? normalizeState(remote) : loadState()
-  if (!remote?.users) {
-    await saveRemoteState(JSON.stringify(state))
+  const remoteStand = await loadRemoteState(REMOTE_TABLE)
+  standState = remoteStand?.users ? normalizeState(remoteStand) : loadState()
+  const remoteCs2 = await loadRemoteState(CS2_REMOTE_TABLE)
+  cs2State = remoteCs2?.users
+    ? normalizeCs2State(remoteCs2)
+    : normalizeCs2State(loadCs2LocalState())
+  if (!remoteStand?.users) {
+    await saveRemoteState(REMOTE_TABLE, JSON.stringify(standState))
+  }
+  if (!remoteCs2?.users) {
+    await saveRemoteState(CS2_REMOTE_TABLE, JSON.stringify(cs2State))
   }
   console.log('Persistence: PostgreSQL (DATABASE_URL)')
 } else {
-  state = loadState()
+  standState = loadState()
+  cs2State = normalizeCs2State(loadCs2LocalState())
   console.log('Persistence: local JSON (ephemeral on Render free plan)')
 }
 
-let saveTimer = null
-let saveQueue = Promise.resolve()
+state = standState
+syncCs2Accounts()
 
-function saveState() {
+let saveQueue = Promise.resolve()
+const saveTimers = { stand: null, cs2: null }
+
+function persistLocal(game, snapshot) {
   try {
-    fs.writeFileSync(DB_PATH, JSON.stringify(state, null, 2))
+    fs.writeFileSync(game === 'cs2' ? CS2_DB_PATH : DB_PATH, snapshot)
   } catch (error) {
     console.error('Local state save failed:', error.message)
   }
+}
 
+function scheduleRemoteSave(game) {
   if (!dbPool) return
-  if (saveTimer) clearTimeout(saveTimer)
-  saveTimer = setTimeout(() => {
-    saveTimer = null
-    const snapshot = JSON.stringify(state)
+  if (saveTimers[game]) clearTimeout(saveTimers[game])
+  saveTimers[game] = setTimeout(() => {
+    saveTimers[game] = null
+    const snapshot = JSON.stringify(game === 'cs2' ? cs2State : standState)
+    const table = game === 'cs2' ? CS2_REMOTE_TABLE : REMOTE_TABLE
     saveQueue = saveQueue
-      .then(() => saveRemoteState(snapshot))
+      .then(() => saveRemoteState(table, snapshot))
       .catch((error) => console.error('PostgreSQL save failed:', error.message))
   }, 250)
 }
 
+function saveState() {
+  const game = activeGame
+  if (game === 'cs2') syncCs2AuthBack()
+  persistLocal(game, JSON.stringify(state))
+  if (game === 'cs2') persistLocal('stand', JSON.stringify(standState))
+  scheduleRemoteSave(game)
+  if (game === 'cs2') scheduleRemoteSave('stand')
+}
+
 async function flushState() {
-  if (saveTimer) {
-    clearTimeout(saveTimer)
-    saveTimer = null
-    const snapshot = JSON.stringify(state)
-    saveQueue = saveQueue.then(() => saveRemoteState(snapshot))
+  for (const game of ['stand', 'cs2']) {
+    if (saveTimers[game]) {
+      clearTimeout(saveTimers[game])
+      saveTimers[game] = null
+      const snapshot = JSON.stringify(game === 'cs2' ? cs2State : standState)
+      const table = game === 'cs2' ? CS2_REMOTE_TABLE : REMOTE_TABLE
+      saveQueue = saveQueue.then(() => saveRemoteState(table, snapshot))
+    }
   }
   await saveQueue.catch(() => {})
   if (dbPool) await dbPool.end().catch(() => {})
+}
+
+function useGame(game) {
+  if (game === 'cs2') {
+    syncCs2Accounts()
+    activeGame = 'cs2'
+    state = cs2State
+    SKINS = CS2_SKINS
+    SKIN_BY_ID = CS2_SKIN_BY_ID
+    SKINS_BY_PRICE = CS2_SKINS_BY_PRICE
+    CASES = CS2_CASES
+    CASE_BY_ID = CS2_CASE_BY_ID
+    CASE_PAYLOADS = CS2_CASE_PAYLOADS
+    GLYPHS = CS2_GLYPHS
+    GLYPH_BY_ID = CS2_GLYPH_BY_ID
+    GLYPH_PAYLOADS = CS2_GLYPH_PAYLOADS
+    RARITY_ORDER = CS2_RARITY_ORDER
+    isRareSkin = cs2IsRareSkin
+    liveFeed = cs2LiveFeed
+  } else {
+    activeGame = 'stand'
+    state = standState
+    SKINS = STAND_SKINS
+    SKIN_BY_ID = STAND_SKIN_BY_ID
+    SKINS_BY_PRICE = STAND_SKINS_BY_PRICE
+    CASES = STAND_CASES
+    CASE_BY_ID = STAND_CASE_BY_ID
+    CASE_PAYLOADS = STAND_CASE_PAYLOADS
+    GLYPHS = STAND_GLYPHS
+    GLYPH_BY_ID = STAND_GLYPH_BY_ID
+    GLYPH_PAYLOADS = STAND_GLYPH_PAYLOADS
+    RARITY_ORDER = STAND_RARITY_ORDER
+    isRareSkin = standIsRareSkin
+    liveFeed = standLiveFeed
+  }
+  rarePoolCache.clear()
+  normalPoolCache.clear()
 }
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
@@ -1980,9 +2347,10 @@ function makeValuePool(targetValue) {
   return entries.length ? entries : [...SKINS].slice(0, 20).map((skin) => [skin.id, 1])
 }
 
-const SKINS_BY_PRICE = [...SKINS].sort(
+const STAND_SKINS_BY_PRICE = [...STAND_SKINS].sort(
   (a, b) => a.price - b.price || String(a.id).localeCompare(String(b.id)),
 )
+let SKINS_BY_PRICE = STAND_SKINS_BY_PRICE
 
 function pickNearestSkinByPrice(targetValue) {
   const target = Math.max(1, Number(targetValue) || 1)
@@ -2429,7 +2797,9 @@ function onlineCount() {
   return count
 }
 
-let liveFeed = []
+const standLiveFeed = []
+const cs2LiveFeed = []
+let liveFeed = standLiveFeed
 
 function pushLiveDrop(user, skin, source = 'case') {
   // Скрытые аккаунты (owner/admin) не светятся в публичной ленте дропов.
@@ -2483,6 +2853,7 @@ function createRateLimiter({ name, windowMs = 60_000, max }) {
 
   return function rateLimiter(req, res, next) {
     if (req.method === 'OPTIONS') return next()
+    if (req.__cs2Inner) return next()
 
     const now = Date.now()
     if (now - lastSweep >= windowMs) {
@@ -2847,7 +3218,7 @@ app.post('/api/open-case', auth, (req, res) => {
 
   const totalPrice = roundGold(config.price * count)
   if (user.balance + 1e-9 < totalPrice) {
-    return sendError(res, 400, 'INSUFFICIENT_FUNDS', 'Недостаточно голды для открытия кейса', {
+    return sendError(res, 400, 'INSUFFICIENT_FUNDS', 'Недостаточно средств для открытия кейса', {
       user: publicUser(user),
       daily: buildDaily(),
     })
@@ -2884,7 +3255,7 @@ app.post('/api/open-case', auth, (req, res) => {
     feedEntry: liveFeed[0],
     message:
       count > 1
-        ? `Открыто ${count} кейсов на ${totalValue} G`
+        ? `Открыто ${count} кейсов на ${formatGold(totalValue)}`
         : `Выпал ${openings[0].winner.name}`,
   })
 })
@@ -2902,7 +3273,7 @@ app.post('/api/open-glyph', auth, (req, res) => {
     return sendError(res, 409, 'GLYPH_DROP_ACTIVE', 'Сначала закрой текущий дроп глифа')
   }
   if (user.balance + 1e-9 < totalPrice) {
-    return sendError(res, 400, 'INSUFFICIENT_FUNDS', 'Недостаточно голды для открытия глифов', {
+    return sendError(res, 400, 'INSUFFICIENT_FUNDS', 'Недостаточно средств для открытия глифов', {
       user: publicUser(user),
       daily: buildDaily(),
     })
@@ -3274,7 +3645,7 @@ app.post('/api/sell-skin', auth, (req, res) => {
     amount: skin.price,
     user: publicUser(user),
     daily: buildDaily(),
-    message: `${skin.name} продан за ${skin.price} G`,
+    message: `${skin.name} продан за ${formatGold(skin.price)}`,
   })
 })
 
@@ -3305,7 +3676,7 @@ app.post('/api/sell-many', auth, (req, res) => {
     amount,
     user: publicUser(user),
     daily: buildDaily(),
-    message: `Продано ${sold.length} ${sold.length === 1 ? 'предмет' : 'предметов'} на ${amount} G`,
+    message: `Продано ${sold.length} ${sold.length === 1 ? 'предмет' : 'предметов'} на ${formatGold(amount)}`,
   })
 })
 
@@ -3359,7 +3730,7 @@ app.post('/api/applications', auth, (req, res) => {
 
   if (type === 'gold') {
     if (user.role !== 'player') {
-      return sendError(res, 403, 'ONLY_PLAYERS', 'Заявки на голду доступны только игрокам')
+      return sendError(res, 403, 'ONLY_PLAYERS', 'Заявки на валюту доступны только игрокам')
     }
     const daily = buildDaily()
     if (daily.remaining > 0) {
@@ -3371,7 +3742,7 @@ app.post('/api/applications', auth, (req, res) => {
       )
     }
     if (hasPending('gold')) {
-      return sendError(res, 409, 'APPLICATION_PENDING', 'У вас уже есть активная заявка на голду')
+      return sendError(res, 409, 'APPLICATION_PENDING', 'У вас уже есть активная заявка на валюту')
     }
     const amount = Math.floor(Number(req.body?.amount))
     if (!Number.isFinite(amount) || amount < 1 || amount > MAX_GOLD_REQUEST) {
@@ -3702,7 +4073,7 @@ app.post('/api/upgrade', auth, (req, res) => {
   const boost = roundGold(Math.min(requestedBoost, maxUsefulBoost))
 
   if (boost > user.balance + 1e-9) {
-    return sendError(res, 400, 'INSUFFICIENT_FUNDS', 'Недостаточно голды для доплаты', {
+    return sendError(res, 400, 'INSUFFICIENT_FUNDS', 'Недостаточно средств для доплаты', {
       user: publicUser(user),
       daily: buildDaily(),
     })
@@ -3826,7 +4197,7 @@ app.post('/api/case-battle', auth, (req, res) => {
   const entry = roundGold(config.price * rounds)
 
   if (user.balance + 1e-9 < entry) {
-    return sendError(res, 400, 'INSUFFICIENT_FUNDS', 'Недостаточно голды для битвы', {
+    return sendError(res, 400, 'INSUFFICIENT_FUNDS', 'Недостаточно средств для битвы', {
       user: publicUser(user),
       daily: buildDaily(),
     })
@@ -3888,7 +4259,7 @@ app.post('/api/case-battle', auth, (req, res) => {
     user: publicUser(user),
     daily: buildDaily(),
     message: won
-      ? `Победа! Забрано ${payout} G`
+      ? `Победа! Забрано ${formatGold(payout)}`
       : mode === 'underdog'
         ? 'Поражение: у соперника сумма дешевле'
         : 'Поражение: у соперника сумма дороже',
@@ -3901,7 +4272,7 @@ app.post('/api/buy-skin', auth, (req, res) => {
   const user = req.user
   if (!skin) return sendError(res, 404, 'SKIN_NOT_FOUND', 'Скин не найден')
   if (user.balance + 1e-9 < skin.price) {
-    return sendError(res, 400, 'INSUFFICIENT_FUNDS', 'Недостаточно голды', { user: publicUser(user) })
+    return sendError(res, 400, 'INSUFFICIENT_FUNDS', 'Недостаточно средств', { user: publicUser(user) })
   }
 
   user.balance = roundGold(user.balance - skin.price)
@@ -3960,8 +4331,8 @@ app.post('/api/deposit', auth, (req, res) => {
   saveState()
 
   const bonusParts = []
-  if (eventBonus > 0) bonusParts.push(`зимний бонус +${eventBonus} G`)
-  if (promoBonus > 0) bonusParts.push(`промокод +${promoBonus} G`)
+  if (eventBonus > 0) bonusParts.push(`зимний бонус +${formatGold(eventBonus)}`)
+  if (promoBonus > 0) bonusParts.push(`промокод +${formatGold(promoBonus)}`)
 
   res.json({
     ok: true,
@@ -3977,16 +4348,49 @@ app.post('/api/deposit', auth, (req, res) => {
     daily: buildDaily(),
     message:
       bonus > 0
-        ? `Демо-донат +${amount} G · ${bonusParts.join(' · ')}`
+        ? `Демо-донат +${formatGold(amount)} · ${bonusParts.join(' · ')}`
         : unlimited
-          ? `Пополнение +${amount} G без лимита`
-          : `Демо-донат +${amount} G`,
+          ? `Пополнение +${formatGold(amount)} без лимита`
+          : `Демо-донат +${formatGold(amount)}`,
   })
 })
 
 app.post('/api/logout', auth, (_req, res) => {
   // Токены stateless; клиент удаляет его локально.
   res.json({ ok: true })
+})
+
+/* ------------------------------------------------------------------ */
+/*  CS2 game routing                                                   */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Полный паритет с StandGrade без дублирования API: запросы /api/cs2/*
+ * выполняются тем же обработчиком, что и /api/*, но с подменённым
+ * состоянием, каталогом, кейсами и печатями CS2. Все обработчики
+ * синхронные, поэтому подмена глобалов безопасна в рамках одного запроса.
+ */
+app.use('/api/cs2', (req, res, next) => {
+  if (!cs2State) return next()
+  const suffix = req.url || '/'
+  req.url = `/api${suffix}`
+  req.originalUrl = `/api${suffix}`
+  req.__cs2Inner = true
+  useGame('cs2')
+  let restored = false
+  const restore = () => {
+    if (restored) return
+    restored = true
+    useGame('stand')
+  }
+  try {
+    app.handle(req, res, (error) => {
+      restore()
+      if (error) next(error)
+    })
+  } finally {
+    if (res.headersSent) restore()
+  }
 })
 
 /* ------------------------------------------------------------------ */
@@ -4012,7 +4416,8 @@ app.use((err, _req, res, _next) => {
 })
 
 function formatGold(value) {
-  return `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(value || 0)} G`
+  const suffix = activeGame === 'cs2' ? 'КС' : 'G'
+  return `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(value || 0)} ${suffix}`
 }
 
 applyOwnerPasswordReset()
