@@ -1979,13 +1979,23 @@ function GlyphCardBack({ deck, className = '' }) {
 
 const GLYPH_CONFETTI_COLORS = ['#35ff87', '#ffcf4d', '#5effc9', '#c08bff', '#ff7ad9', '#ffffff']
 
+function dropProfitTier(prices, cost) {
+  const priceList = (prices || []).map((price) => Number(price) || 0)
+  const base = Number(cost) || 0
+  if (!base || !priceList.length) return null
+  if (priceList.some((price) => price >= base * 2)) return 'jackpot'
+  if (priceList.some((price) => price > base)) return 'profit'
+  return 'loss'
+}
+
 function glyphDropTier(glyphDrop) {
   const cost = Number(glyphDrop?.cardPrice) || 0
-  const drops = glyphDrop?.drops || []
-  if (!cost || !drops.length) return 'loss'
-  if (drops.some((drop) => Number(drop.currentDrop?.price) >= cost * 2)) return 'jackpot'
-  if (drops.some((drop) => Number(drop.currentDrop?.price) > cost)) return 'profit'
-  return 'loss'
+  return (
+    dropProfitTier(
+      (glyphDrop?.drops || []).map((drop) => drop.currentDrop?.price),
+      cost,
+    ) || 'loss'
+  )
 }
 
 function GlyphConfetti() {
@@ -6789,7 +6799,12 @@ function CaseModal({
         const topIndex = RARITY_ORDER.indexOf(top)
         return nextIndex > topIndex ? item.rarity : top
       }, 'Common')
-      playCaseResult(best)
+      const tier = dropProfitTier(
+        (results || []).map((item) => item.price),
+        caseData.price,
+      )
+      if (tier) playGlyphResult(tier)
+      else playCaseResult(best)
     }, duration + 120)
 
     return () => {
@@ -6903,6 +6918,9 @@ function CaseModal({
   const compactReels = reels.length > 1
   const winnerSpot = (reels[0] || []).findIndex((skin) => skin.winner)
   const single = results?.[0] || null
+  const singleJackpot = Boolean(
+    single && caseData.price > 0 && single.price >= caseData.price * 2,
+  )
   const ctaLabel = freeLocked
     ? `Через ${formatCountdown(freeCooldownIn)}`
     : isFree
@@ -7285,12 +7303,21 @@ function CaseModal({
                     <div className="flex min-w-0 items-center gap-3">
                       <div className="relative h-[74px] w-[96px] shrink-0 overflow-hidden rounded-xl border border-acid/25">
                         <SkinVisual skin={single} className="h-full w-full" showRarity={false} />
+                        {singleJackpot && (
+                          <span className="glyph-jackpot-ring pointer-events-none absolute inset-0 z-10 rounded-xl ring-2 ring-[#ffcf4d]/70" />
+                        )}
+                        {singleJackpot && <GlyphConfetti />}
                       </div>
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-[8px] font-black uppercase tracking-[0.15em] text-acid">
                             Вам выпало
                           </span>
+                          {singleJackpot && (
+                            <span className="rounded-md bg-[#ffcf4d] px-1.5 py-0.5 text-[7px] font-black uppercase tracking-[0.06em] text-[#221800]">
+                              x2+
+                            </span>
+                          )}
                           <RarityBadge rarity={single.rarity} />
                         </div>
                         <h3 className="mt-1.5 truncate font-display text-[15px] font-extrabold tracking-[-0.03em] text-white sm:text-[18px]">
@@ -7366,19 +7393,33 @@ function CaseModal({
                   </div>
 
                   <div className="relative mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-                    {results.map((item) => {
+                    {results.map((item, index) => {
                       const meta = RARITY[item.rarity] || RARITY.Common
                       const isSold = soldSet.has(item.instanceId)
+                      const jackpot =
+                        caseData.price > 0 && item.price >= caseData.price * 2
                       return (
                         <div
                           key={item.instanceId}
                           className={cx(
-                            'relative overflow-hidden rounded-lg border bg-black/25 transition',
+                            'glyph-card-reveal relative overflow-hidden rounded-lg border bg-black/25 transition',
                             isSold ? 'opacity-40' : '',
                           )}
-                          style={{ borderColor: `${meta.color}30` }}
+                          style={{
+                            borderColor: jackpot ? 'rgba(255,207,77,.65)' : `${meta.color}30`,
+                            animationDelay: `${index * 40}ms`,
+                          }}
                         >
                           <SkinVisual skin={item} className="h-16 w-full" showRarity={false} />
+                          {jackpot && (
+                            <span className="glyph-jackpot-ring pointer-events-none absolute inset-0 z-10 rounded-lg ring-2 ring-[#ffcf4d]/70" />
+                          )}
+                          {jackpot && !isSold && <GlyphConfetti />}
+                          {jackpot && (
+                            <span className="absolute left-1.5 top-1.5 z-20 rounded bg-[#ffcf4d] px-1 py-0.5 text-[6px] font-black uppercase tracking-[0.04em] text-[#221800]">
+                              x2+
+                            </span>
+                          )}
                           <div className="p-2">
                             <div className="truncate text-[8px] font-extrabold text-white/80">{item.name}</div>
                             <div className="mt-0.5 flex items-center justify-between gap-1">
