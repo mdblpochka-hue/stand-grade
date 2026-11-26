@@ -3420,7 +3420,7 @@ app.post('/api/glyph/collect', auth, (req, res) => {
   const selected = session.drops.filter((drop) => uniqueIds.includes(drop.id) && !drop.failed)
   const hasFailed = session.drops.some((drop) => drop.failed)
   if (!selected.length && !hasFailed) {
-    return sendError(res, 400, 'NO_DROP_SELECTED', 'Выбери хотя бы один дроп')
+    return sendError(res, 400, 'NO_DROP_SELECTED', 'Выбери хотя бы один дроп', { user: publicUser(user), glyphDrop: publicGlyphDrop(user) })
   }
 
   const count = Math.max(1, Math.trunc(Number(session.count) || 1))
@@ -3467,7 +3467,7 @@ app.post('/api/glyph/sell', auth, (req, res) => {
   const selected = session.drops.filter((drop) => uniqueIds.includes(drop.id) && !drop.failed)
   const hasFailed = session.drops.some((drop) => drop.failed)
   if (!selected.length && !hasFailed) {
-    return sendError(res, 400, 'NO_DROP_SELECTED', 'Выбери хотя бы один дроп')
+    return sendError(res, 400, 'NO_DROP_SELECTED', 'Выбери хотя бы один дроп', { user: publicUser(user), glyphDrop: publicGlyphDrop(user) })
   }
 
   const count = Math.max(1, Math.trunc(Number(session.count) || 1))
@@ -3510,7 +3510,7 @@ app.post('/api/glyph/upgrade', auth, (req, res) => {
   const selected = session.drops.filter(
     (drop) => uniqueIds.includes(drop.id) && !drop.failed,
   )
-  if (!selected.length) return sendError(res, 400, 'NO_DROP_SELECTED', 'Выбери хотя бы один дроп')
+  if (!selected.length) return sendError(res, 400, 'NO_DROP_SELECTED', 'Выбери хотя бы один дроп', { user: publicUser(user), glyphDrop: publicGlyphDrop(user) })
 
   const multiplier = Math.trunc(Number(req.body?.multiplier))
   if (!GLYPH_UPGRADE_MULTIPLIERS.includes(multiplier)) {

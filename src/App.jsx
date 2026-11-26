@@ -2459,7 +2459,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       const data = await apiRequest('/api/glyph/collect', {
         method: 'POST',
         token,
-        body: { dropIds: selectedDropIds },
+        body: { dropIds: selectedDrops.map((drop) => drop.id) },
       })
       onUpdate(data)
       playCoin()
@@ -2470,9 +2470,14 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
         finishBatch()
       }
     } catch (requestError) {
-      setError(requestError.message)
-      onToast(requestError.message, 'error')
+      const message =
+        requestError.code === 'NO_DROP_SELECTED'
+          ? 'Пачка обновилась — выбери карту заново'
+          : requestError.message
+      setError(message)
+      onToast(message, 'error')
       if (requestError.data?.user) onUpdate(requestError.data)
+      setSelectedDropIds([])
     } finally {
       setBusy('')
       actionRef.current = false
@@ -2489,7 +2494,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       const data = await apiRequest('/api/glyph/sell', {
         method: 'POST',
         token,
-        body: { dropIds: selectedDropIds },
+        body: { dropIds: selectedDrops.map((drop) => drop.id) },
       })
       onUpdate(data)
       playCoin()
@@ -2500,9 +2505,14 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
         finishBatch()
       }
     } catch (requestError) {
-      setError(requestError.message)
-      onToast(requestError.message, 'error')
+      const message =
+        requestError.code === 'NO_DROP_SELECTED'
+          ? 'Пачка обновилась — выбери карту заново'
+          : requestError.message
+      setError(message)
+      onToast(message, 'error')
       if (requestError.data?.user) onUpdate(requestError.data)
+      setSelectedDropIds([])
     } finally {
       setBusy('')
       actionRef.current = false
@@ -2545,7 +2555,10 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       const data = await apiRequest('/api/glyph/upgrade', {
         method: 'POST',
         token,
-        body: { multiplier: upgradeMultiplier, dropIds: selectedDropIds },
+        body: {
+          multiplier: upgradeMultiplier,
+          dropIds: selectedDrops.map((drop) => drop.id),
+        },
       })
       pendingUpgradeRef.current = data
       setUpgradeResults(data.results || [])
@@ -2554,6 +2567,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       setUpgradeError(requestError.message)
       onToast(requestError.message, 'error')
       if (requestError.data?.user) onUpdate(requestError.data)
+      setSelectedDropIds([])
     } finally {
       actionRef.current = false
     }
