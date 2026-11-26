@@ -1992,6 +1992,8 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   const actionRef = useRef(false)
   const stopSoundRef = useRef(null)
   const pendingUpgradeRef = useRef(null)
+  const cardsAreaRef = useRef(null)
+  const [cardsSpace, setCardsSpace] = useState({ width: 0, height: 0 })
   const upgradeDuration = fast ? ANIM_MS_FAST : ANIM_MS_NORMAL
 
   const activeDeck =
@@ -2012,16 +2014,24 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   )
   const allSelected =
     selectableDrops.length > 0 && selectedDrops.length === selectableDrops.length
-  const cardGridClass =
-    drops.length <= 1
-      ? 'grid-cols-1 max-w-[380px]'
-      : drops.length === 2
-        ? 'grid-cols-2 max-w-[720px]'
-        : drops.length === 3
-          ? 'grid-cols-2 max-w-[1020px] sm:grid-cols-3'
-          : drops.length === 4
-            ? 'grid-cols-2 max-w-[1200px] sm:grid-cols-4'
-            : 'grid-cols-2 max-w-[1360px] sm:grid-cols-3 lg:grid-cols-5'
+  const cardCols = Math.min(
+    Math.max(drops.length, 1),
+    cardsSpace.width < 560 ? 2 : cardsSpace.width < 760 ? 3 : 5,
+  )
+  const cardRows = Math.max(1, Math.ceil(Math.max(drops.length, 1) / cardCols))
+  const cardGap = 12
+  const cardsAvailableWidth = Math.max(0, cardsSpace.width - 24)
+  const cardsAvailableHeight = Math.max(0, cardsSpace.height - 36)
+  const cardWidthFromGrid =
+    (cardsAvailableWidth - (cardCols - 1) * cardGap) / cardCols
+  const cardWidthFromHeight =
+    cardsAvailableHeight > 0
+      ? ((cardsAvailableHeight - (cardRows - 1) * cardGap) / cardRows) * 0.7
+      : cardWidthFromGrid
+  const cardWidth = Math.max(
+    96,
+    Math.min(320, cardWidthFromGrid, cardWidthFromHeight),
+  )
 
   useEffect(() => {
     setSelectedDropIds((previous) => {
@@ -2031,6 +2041,24 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       return next.length === previous.length ? previous : next
     })
   }, [session?.id, drops.map((drop) => `${drop.id}:${drop.failed ? 1 : 0}`).join('|')])
+
+  useLayoutEffect(() => {
+    const node = cardsAreaRef.current
+    if (!node) return undefined
+    const update = () => {
+      const width = node.clientWidth
+      const height = node.clientHeight
+      setCardsSpace((previous) =>
+        previous.width === width && previous.height === height
+          ? previous
+          : { width, height },
+      )
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [modalOpen, deckPreview, drops.length])
 
   useEffect(() => {
     if (upgradePhase !== 'spinning' || !upgradeResults.length) return undefined
@@ -2453,7 +2481,8 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
         >
           <div
             className={cx(
-              'pop-in relative flex max-h-[92vh] w-full flex-col overflow-hidden rounded-[26px] border border-white/[0.1] bg-[#0b120d] shadow-panel',
+              'pop-in relative flex w-full flex-col overflow-hidden rounded-[26px] border border-white/[0.1] bg-[#0b120d] shadow-panel',
+              session && !deckPreview ? 'h-[92vh]' : 'max-h-[92vh]',
               deckPreview ? 'max-w-[470px]' : 'max-w-[1400px]',
             )}
           >
@@ -2616,8 +2645,16 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                 })()
               ) : session && drops.length ? (
                 <div className="flex min-h-0 flex-1 flex-col">
-                  <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-5">
-                    <div className={cx('mx-auto grid gap-2 sm:gap-3', cardGridClass)}>
+                  <div ref={cardsAreaRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-5">
+                    <div className="flex min-h-full items-center justify-center">
+                    <div
+                      className="grid"
+                      style={{
+                        gap: `${cardGap}px`,
+                        gridTemplateColumns: `repeat(${cardCols}, minmax(0, ${cardWidth}px))`,
+                        justifyContent: 'center',
+                      }}
+                    >
                       {drops.map((dropItem) => {
                         const skin = dropItem.currentDrop
                         const meta = RARITY[skin.rarity] || RARITY.Common
@@ -2682,7 +2719,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                                       ? result?.roll ?? null
                                       : null
                                   }
-                                  size={150}
+                                  size={Math.max(96, Math.min(170, Math.round(cardWidth * 0.72)))}
                                   duration={upgradeDuration}
                                   spinKey={
                                     result
@@ -2727,6 +2764,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                           </button>
                         )
                       })}
+                    </div>
                     </div>
                   </div>
 
