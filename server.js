@@ -1575,6 +1575,7 @@ function syncCs2AuthBack() {
 }
 
 function migrateUser(user, skinById = SKIN_BY_ID) {
+  if (!(skinById instanceof Map)) skinById = SKIN_BY_ID
   user.tokenVersion = Math.max(0, Math.trunc(Number(user.tokenVersion) || 0))
   if (!('glyphDrop' in user)) user.glyphDrop = null
   if (user.glyphDrop) {
@@ -1684,7 +1685,7 @@ function normalizeState(parsed) {
   }
   // Скрытый admin удалён: при выключенном флаге стираем аккаунт и из старой базы.
   if (!ENABLE_ADMIN_ACCOUNT) delete parsed.users.admin
-  Object.values(parsed.users).forEach(migrateUser)
+  Object.values(parsed.users).forEach((user) => migrateUser(user))
   if (!Array.isArray(parsed.promos)) parsed.promos = defaultPromos()
   if (!Array.isArray(parsed.applications)) parsed.applications = []
   parsed.applications = parsed.applications
