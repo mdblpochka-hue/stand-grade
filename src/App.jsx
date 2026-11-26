@@ -6723,6 +6723,9 @@ function CaseModal({
   const [selling, setSelling] = useState(false)
   const [error, setError] = useState('')
   const [now, setNow] = useState(() => Date.now())
+  const [viewportHeight, setViewportHeight] = useState(() =>
+    typeof window !== 'undefined' ? window.innerHeight : 900,
+  )
   const viewportRefs = useRef([])
   const trackRefs = useRef([])
   const stopSoundRef = useRef(null)
@@ -6766,6 +6769,12 @@ function CaseModal({
     const timer = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(timer)
   }, [isFree, user.nextFreeCaseAt])
+
+  useEffect(() => {
+    const onResize = () => setViewportHeight(window.innerHeight)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   const requestClose = useCallback(() => {
     if (!spinning && !upgrading) onClose()
@@ -7011,6 +7020,19 @@ function CaseModal({
   }
 
   const compactReels = reels.length > 1
+  const compactReelHeight = compactReels
+    ? Math.max(
+        38,
+        Math.min(
+          78,
+          Math.floor(
+            (Math.max(260, viewportHeight * 0.94 - 210) - (reels.length - 1) * 6) /
+              reels.length,
+          ),
+        ),
+      )
+    : 78
+  const compactCardSize = Math.max(30, compactReelHeight - 12)
   const winnerSpot = (reels[0] || []).findIndex((skin) => skin.winner)
   const single = results?.[0] || null
   const singleJackpot = Boolean(
@@ -7036,7 +7058,7 @@ function CaseModal({
         if (event.target === event.currentTarget) requestClose()
       }}
     >
-      <div className="relative flex h-full w-full max-w-[1120px] flex-col overflow-hidden border border-white/[0.09] bg-[#0a100c] shadow-panel sm:h-auto sm:max-h-[94vh] sm:rounded-[26px]">
+      <div className="relative flex h-full w-full max-w-[1400px] flex-col overflow-hidden border border-white/[0.09] bg-[#0a100c] shadow-panel sm:h-auto sm:max-h-[94vh] sm:rounded-[26px]">
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/[0.07] bg-[#0d1510]/95 px-4 py-3 backdrop-blur sm:px-5">
           <div className="flex min-w-0 items-center gap-3">
             <div
@@ -7088,7 +7110,7 @@ function CaseModal({
 
         <div className="no-scrollbar flex-1 overflow-y-auto">
           <div className="p-3 sm:p-5">
-            {caseData.price > 0 && !showResult && (
+            {caseData.price > 0 && !showResult && !spinning && (
               <div className="relative mb-3 overflow-hidden rounded-2xl border border-acid/12 bg-[#08120c] p-3 sm:p-4">
                 <div className="absolute inset-0 bg-grid-faint opacity-15" />
                 <div
@@ -7214,7 +7236,7 @@ function CaseModal({
                 </div>
               </div>
 
-              <div className={cx('space-y-1.5', compactReels && 'max-h-[46vh] overflow-y-auto pr-1')}>
+              <div className="space-y-1.5">
                 {reels.map((reel, reelIndex) => {
                   if (!compactReels) {
                     return (
@@ -7300,7 +7322,8 @@ function CaseModal({
                   return (
                     <div
                       key={`reel-${reelIndex}`}
-                      className="relative h-[78px] overflow-hidden rounded-lg border border-white/[0.06] bg-black/20"
+                      className="relative overflow-hidden rounded-lg border border-white/[0.06] bg-black/20"
+                      style={{ height: compactReelHeight }}
                       ref={(node) => {
                         viewportRefs.current[reelIndex] = node
                       }}
@@ -7323,10 +7346,14 @@ function CaseModal({
                               <div
                                 key={skin.reelId || `${skin.id}-${index}`}
                                 className={cx(
-                                  'relative h-[60px] w-[58px] shrink-0 overflow-hidden rounded-lg border bg-[#0b120d]',
+                                  'relative shrink-0 overflow-hidden rounded-lg border bg-[#0b120d]',
                                   isWinner ? 'result-glow border-acid/70' : 'border-white/[0.07]',
                                 )}
-                                style={!isWinner ? { borderColor: `${meta.color}20` } : undefined}
+                                style={{
+                                  height: compactCardSize,
+                                  width: compactCardSize,
+                                  ...(isWinner ? {} : { borderColor: `${meta.color}20` }),
+                                }}
                               >
                                 <SkinVisual
                                   skin={skin}
