@@ -6795,8 +6795,14 @@ function CaseModal({
       const target = track.children[flaggedIndex >= 0 ? flaggedIndex : WINNER_INDEX]
       if (!target) return
 
+      const startIndex = reel.findIndex((item) => item.isStart)
+      const first = startIndex >= 0 ? track.children[startIndex] : null
+      const startOffset = first
+        ? Math.max(0, first.offsetLeft + first.offsetWidth / 2 - viewport.clientWidth / 2)
+        : 0
+
       track.style.transition = 'none'
-      track.style.transform = 'translate3d(0,0,0)'
+      track.style.transform = `translate3d(${-startOffset}px,0,0)`
       void track.offsetWidth
 
       const jitter = (Math.random() * 0.4 - 0.2) * target.offsetWidth
@@ -6863,7 +6869,7 @@ function CaseModal({
     setReels([makePreviewReel(caseData)])
   }
 
-  async function spin() {
+  async function spin(startItems = []) {
     if (spinning || loading || freeLocked) return
     unlockAudio()
     setLoading(true)
@@ -6884,7 +6890,25 @@ function CaseModal({
         : [{ winner: data.winner, reel: data.reel }]
       onUpdate(data)
       const winners = openings.map((opening) => opening.winner)
-      setReels(openings.map((opening) => opening.reel))
+      const nextReels = openings.map((opening, index) => {
+        const previous = startItems[index]
+        if (!previous) return opening.reel
+        const startItem = {
+          ...previous,
+          reelId: `start-${index}-${previous.instanceId || previous.id || Date.now()}`,
+          winner: false,
+          isStart: true,
+        }
+        // Несколько предметов перед стартовым, чтобы он встал ровно под
+        // указатель и лента поехала из того же места, где остановилась.
+        const leadCount = Math.min(20, opening.reel.length)
+        return [
+          ...opening.reel.slice(0, leadCount),
+          startItem,
+          ...opening.reel.slice(leadCount),
+        ]
+      })
+      setReels(nextReels)
       setResults(winners)
       setSelectedIds(winners.map((winner) => winner.instanceId))
       setSpinning(true)
@@ -6913,9 +6937,11 @@ function CaseModal({
   }
 
   async function spinAgain() {
+    if (spinning || loading || freeLocked) return
+    const startItems = (results || []).map((item) => ({ ...item }))
     resetTable()
     await sleep(30)
-    await spin()
+    await spin(startItems)
   }
 
   async function sellPrize() {
@@ -7402,7 +7428,7 @@ function CaseModal({
                     )}
                     <button
                       type="button"
-                      onClick={spin}
+                      onClick={() => spin()}
                       disabled={spinning || loading || !canAfford || freeLocked}
                       className="btn-acid min-w-[190px] !py-3 !text-[11px] disabled:shadow-none"
                     >
@@ -7558,6 +7584,22 @@ function CaseModal({
                     <div className="flex min-w-0 flex-1 flex-wrap items-center justify-center gap-1.5">
                       <button
                         type="button"
+                        onClick={spinAgain}
+                        disabled={
+                          spinning ||
+                          loading ||
+                          upgrading ||
+                          selling ||
+                          freeLocked ||
+                          !canAfford
+                        }
+                        title="Открыть этот кейс ещё раз"
+                        className="h-9 rounded-lg border border-acid/60 bg-acid px-5 text-[9px] font-black uppercase tracking-[0.08em] text-[#041007] shadow-[0_0_24px_rgba(53,255,135,.28)] transition hover:bg-[#5cffa0] disabled:opacity-35"
+                      >
+                        Открыть ещё{isFree ? '' : ` ×${effectiveCount}`}
+                      </button>
+                      <button
+                        type="button"
                         onClick={requestClose}
                         disabled={upgrading}
                         className="h-9 rounded-lg border border-white/[0.12] bg-white/[0.04] px-5 text-[9px] font-black uppercase tracking-[0.08em] text-white/75 transition hover:bg-white/[0.08] disabled:opacity-35"
@@ -7576,7 +7618,7 @@ function CaseModal({
                         type="button"
                         onClick={upgradeSelected}
                         disabled={!selectedResults.length || upgrading || selling}
-                        className="h-9 rounded-lg border border-acid/60 bg-acid px-6 text-[9px] font-black uppercase tracking-[0.1em] text-[#041007] shadow-[0_0_24px_rgba(53,255,135,.28)] transition hover:bg-[#5cffa0] disabled:opacity-40"
+                        className="h-9 rounded-lg border border-acid/40 bg-acid/[0.08] px-6 text-[9px] font-black uppercase tracking-[0.1em] text-acid transition hover:bg-acid/[0.16] disabled:opacity-40"
                       >
                         {upgrading ? 'Апгрейдим...' : 'Апгрейд'}
                       </button>
