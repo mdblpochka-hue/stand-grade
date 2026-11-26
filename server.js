@@ -1630,8 +1630,15 @@ function migrateUser(user, skinById = SKIN_BY_ID) {
         0,
         Math.min(GLYPH_REROLLS, Math.trunc(attempts)),
       )
-      if (user.glyphDrop.drops.some((drop) => drop.failed)) {
-        user.glyphDrop.attemptsLeft = 0
+      // Совместимость со старыми сессиями: раньше один сгоревший апгрейд
+      // обнулял все перекруты. Даём владельцу такой сессии один перекрут,
+      // чтобы он мог продолжить с оставшимися картами.
+      if (
+        user.glyphDrop.attemptsLeft <= 0 &&
+        user.glyphDrop.drops.some((drop) => drop.failed) &&
+        user.glyphDrop.drops.some((drop) => !drop.failed)
+      ) {
+        user.glyphDrop.attemptsLeft = 1
       }
       user.glyphDrop.drops.forEach((drop) => {
         delete drop.attemptsLeft
@@ -3357,9 +3364,6 @@ app.post('/api/glyph/reroll', auth, (req, res) => {
   const user = req.user
   const session = user.glyphDrop
   if (!session?.drops?.length) return sendError(res, 409, 'NO_GLYPH_DROP', 'Сначала открой глиф')
-  if (session.drops.some((drop) => drop.failed)) {
-    return sendError(res, 400, 'REROLL_BURNED', 'После неудачного апгрейда замены сгорают')
-  }
   const attemptsLeft = Math.max(0, Math.trunc(Number(session.attemptsLeft) || 0))
   if (attemptsLeft <= 0) {
     return sendError(res, 400, 'NO_ATTEMPTS', 'Перекруты закончились — забери, продай или отправь дроп в апгрейд')
@@ -3367,15 +3371,19 @@ app.post('/api/glyph/reroll', auth, (req, res) => {
   const deck = GLYPH_BY_ID.get(session.deckId)
   if (!deck) return sendError(res, 404, 'GLYPH_NOT_FOUND', 'Печать не найдена')
 
-  const rollCount = session.drops.length
-  for (const drop of session.drops) {
+  const activeDrops = session.drops.filter((drop) => !drop.failed)
+  if (!activeDrops.length) {
+    return sendError(res, 400, 'NO_ACTIVE_CARDS', 'Не осталось карт для перекрута — забери сгоревшие и открой новую печать')
+  }
+  const rollCount = activeDrops.length
+  for (const drop of activeDrops) {
     const oldSkin = SKIN_BY_ID.get(drop.currentDrop.id) || drop.currentDrop
     state.glyphBank = Math.max(
       0,
       roundGold((Number(state.glyphBank) || 0) + oldSkin.price - deck.price),
     )
   }
-  session.drops = Array.from({ length: rollCount }, () => {
+  const replacements = Array.from({ length: rollCount }, () => {
     const skin = rollGlyphDrop(deck) || { ...weightedPickFrom(deck.pool) }
     return {
       id: crypto.randomUUID(),
@@ -3383,6 +3391,10 @@ app.post('/api/glyph/reroll', auth, (req, res) => {
       rollId: crypto.randomUUID(),
     }
   })
+  let replacementIndex = 0
+  session.drops = session.drops.map((drop) =>
+    drop.failed ? drop : replacements[replacementIndex++],
+  )
   session.attemptsLeft = attemptsLeft - 1
   saveState()
 
@@ -3555,8 +3567,7 @@ app.post('/api/glyph/upgrade', auth, (req, res) => {
     }
   }
 
-  const attemptsBurned = losses > 0 && session.attemptsLeft > 0
-  if (losses > 0) session.attemptsLeft = 0
+  const attemptsBurned = false
 
   saveState()
 
@@ -3575,7 +3586,7 @@ app.post('/api/glyph/upgrade', auth, (req, res) => {
     remaining,
     user: publicUser(user),
     daily: buildDaily(),
-    message: `x${multiplier}: успешно ${wins} из ${selected.length}${compensationTotal > 0 ? ` · компенсация +${formatGold(compensationTotal)}` : ''}${losses > 0 ? ' · замены сгорели' : ''}${remaining > 0 ? ` · осталось карт: ${remaining}` : ''}`,
+    message: `x${multiplier}: успешно ${wins} из ${selected.length}${compensationTotal > 0 ? ` · компенсация +${formatGold(compensationTotal)}` : ''}${losses > 0 ? ` · сгорело карт: ${losses}` : ''}${remaining > 0 ? ` · осталось карт: ${remaining}` : ''}`,
   })
 })
 

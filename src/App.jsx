@@ -2227,7 +2227,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   const selectableDrops = drops.filter((drop) => !drop.failed)
   const selectedDrops = selectableDrops.filter((drop) => selectedDropIds.includes(drop.id))
   const hasFailed = drops.some((drop) => drop.failed)
-  const canReroll = Boolean(session && session.attemptsLeft > 0 && !hasFailed)
+  const canReroll = Boolean(session && session.attemptsLeft > 0 && selectableDrops.length > 0)
   const resultLosses = upgradeResults.filter((result) => !result.won).length
   const selectedValue = selectedDrops.reduce(
     (sum, drop) => sum + drop.currentDrop.price,
@@ -2307,7 +2307,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       setUpgradePhase('result')
       playUpgradeResult(wins > 0)
       onToast(
-        `x${upgradeMultiplier}: успешно ${wins} из ${upgradeResults.length}${compensationTotal > 0 ? ` · компенсация +${formatPrice(compensationTotal)}` : ''}${losses > 0 ? ' · замены сгорели' : ''}`,
+        `x${upgradeMultiplier}: успешно ${wins} из ${upgradeResults.length}${compensationTotal > 0 ? ` · компенсация +${formatPrice(compensationTotal)}` : ''}${losses > 0 ? ` · сгорело карт: ${losses}` : ''}`,
         wins > 0 ? 'success' : 'error',
       )
     }, upgradeDuration + 120)
@@ -3162,13 +3162,13 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                         : upgradePhase === 'result'
                           ? resultLosses > 0
                             ? selectableDrops.length
-                              ? 'Апгрейд не прошёл — все оставшиеся замены сгорели'
+                              ? 'Апгрейд не прошёл — сгорела выбранная карта, остальные можно перекрутить'
                               : 'Все карты сгорели — можно открыть снова'
                             : 'Выбери карты для следующего действия'
                           : !selectableDrops.length && hasFailed
                             ? 'Все карты сгорели — открой печать снова'
-                            : hasFailed && session.attemptsLeft <= 0
-                              ? 'Замены сгорели после неудачного апгрейда'
+                            : session.attemptsLeft <= 0
+                              ? 'Перекруты закончились — выбери карты и забери или продай их'
                               : 'Клик по карте выбирает её · апгрейд идёт по выбранным'}
                     </div>
                   </div>
