@@ -1752,7 +1752,12 @@ let activeGame = 'stand'
 if (dbPool) {
   const remoteStand = await loadRemoteState(REMOTE_TABLE)
   standState = remoteStand?.users ? normalizeState(remoteStand) : loadState()
-  const remoteCs2 = await loadRemoteState(CS2_REMOTE_TABLE)
+  let remoteCs2 = null
+  try {
+    remoteCs2 = await loadRemoteState(CS2_REMOTE_TABLE)
+  } catch (error) {
+    console.warn(`CS2 state load failed, using defaults: ${error.message}`)
+  }
   cs2State = remoteCs2?.users
     ? normalizeCs2State(remoteCs2)
     : normalizeCs2State(loadCs2LocalState())
@@ -1760,7 +1765,11 @@ if (dbPool) {
     await saveRemoteState(REMOTE_TABLE, JSON.stringify(standState))
   }
   if (!remoteCs2?.users) {
-    await saveRemoteState(CS2_REMOTE_TABLE, JSON.stringify(cs2State))
+    try {
+      await saveRemoteState(CS2_REMOTE_TABLE, JSON.stringify(cs2State))
+    } catch (error) {
+      console.warn(`CS2 state save failed: ${error.message}`)
+    }
   }
   console.log('Persistence: PostgreSQL (DATABASE_URL)')
 } else {
