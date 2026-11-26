@@ -5003,7 +5003,6 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
       const valid = previous
         .filter((instanceId) => inventory.some((item) => item.instanceId === instanceId))
         .slice(0, UPGRADE_MAX_ITEMS)
-      if (!valid.length && inventory[0]) return [inventory[0].instanceId]
       if (
         valid.length === previous.length &&
         valid.every((instanceId, index) => instanceId === previous[index])
@@ -5041,6 +5040,10 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
       onUpdate(spin.data)
       setResult(spin.data)
       setUpgrading(false)
+      setBaseIds([])
+      setTargetId(null)
+      setBoost(0)
+      setCustomChance('')
       playUpgradeResult(spin.data.won)
       onToast(
         spin.data.message || (spin.data.won ? `Апгрейд успешен: ${spin.data.targetSkin.name}` : 'Апгрейд не удался'),
