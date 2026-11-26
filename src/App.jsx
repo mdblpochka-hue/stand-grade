@@ -1129,6 +1129,9 @@ function Header({
               <Logo compact />
             </div>
           </button>
+          <div className="hidden md:block xl:hidden">
+            <SiteModeSwitch mode="stand" onSwitch={onSwitchMode} compact />
+          </div>
           <div className="hidden xl:block">
             <SiteModeSwitch mode="stand" onSwitch={onSwitchMode} />
           </div>
