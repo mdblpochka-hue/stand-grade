@@ -6729,6 +6729,7 @@ function CaseModal({
   const viewportRefs = useRef([])
   const trackRefs = useRef([])
   const verticalTrackRefs = useRef([])
+  const markerRefs = useRef([])
   const stopSoundRef = useRef(null)
   const duration = fast ? ANIM_MS_FAST : ANIM_MS_NORMAL
   const balance = user.balance
@@ -6806,6 +6807,47 @@ function CaseModal({
         const track = trackRefs.current[index]
         const viewport = viewportRefs.current[index]
         if (!track || !viewport) return
+        const winnerIndices = []
+        reel.forEach((item, itemIndex) => {
+          if (item.winner) winnerIndices.push(itemIndex)
+        })
+        if (winnerIndices.length > 1) {
+          const groupIndex = Math.round(
+            winnerIndices.reduce((sum, value) => sum + value, 0) / winnerIndices.length,
+          )
+          const groupTarget = track.children[groupIndex]
+          if (!groupTarget) return
+          const startIndex = reel.findIndex((item) => item.isStart)
+          const startChild = startIndex >= 0 ? track.children[startIndex] : null
+          const startOffset = startChild
+            ? Math.max(
+                0,
+                startChild.offsetLeft +
+                  startChild.offsetWidth / 2 -
+                  viewport.clientWidth / 2,
+              )
+            : 0
+          track.style.transition = 'none'
+          track.style.transform = `translate3d(${-startOffset}px,0,0)`
+          void track.offsetWidth
+          const groupOffset = Math.max(
+            0,
+            groupTarget.offsetLeft +
+              groupTarget.offsetWidth / 2 -
+              viewport.clientWidth / 2,
+          )
+          winnerIndices.forEach((winnerIndex, markerIndex) => {
+            const marker = markerRefs.current[markerIndex]
+            const child = track.children[winnerIndex]
+            if (!marker || !child) return
+            marker.style.left = `${
+              child.offsetLeft + child.offsetWidth / 2 - groupOffset
+            }px`
+            marker.style.opacity = '1'
+          })
+          tracks.push({ track, offset: groupOffset })
+          return
+        }
         const flaggedIndex = reel.findIndex((item) => item.winner)
         const target = track.children[flaggedIndex >= 0 ? flaggedIndex : WINNER_INDEX]
         if (!target) return
@@ -6908,24 +6950,57 @@ function CaseModal({
         : [{ winner: data.winner, reel: data.reel }]
       onUpdate(data)
       const winners = openings.map((opening) => opening.winner)
-      const nextReels = openings.map((opening, index) => {
-        const previous = startItems[index]
-        if (!previous) return opening.reel
-        const startItem = {
-          ...previous,
-          reelId: `start-${index}-${previous.instanceId || previous.id || Date.now()}`,
-          winner: false,
-          isStart: true,
-        }
-        // Несколько предметов перед стартовым, чтобы он встал ровно под
-        // указатель и лента поехала из того же места, где остановилась.
-        const leadCount = Math.min(20, opening.reel.length)
-        return [
-          ...opening.reel.slice(0, leadCount),
-          startItem,
-          ...opening.reel.slice(leadCount),
-        ]
-      })
+      const multiHorizontal = effectiveCount >= 2 && effectiveCount <= 5
+      let nextReels
+      if (multiHorizontal) {
+        const base = openings[0]?.reel || []
+        const step =
+          effectiveCount === 2 ? 4 : effectiveCount === 3 ? 3 : effectiveCount === 4 ? 2 : 1
+        const center = Math.floor(base.length * 0.7)
+        const firstIndex = Math.max(
+          1,
+          center - Math.floor(((winners.length - 1) * step) / 2),
+        )
+        const reel = base.map((item) => ({ ...item, winner: false }))
+        winners.forEach((winner, index) => {
+          const slot = firstIndex + index * step
+          if (slot < reel.length) {
+            reel[slot] = {
+              ...winner,
+              winner: true,
+              reelId: `multi-${index}-${winner.instanceId || slot}`,
+            }
+          }
+        })
+        const starts = startItems
+          .filter(Boolean)
+          .map((item, index) => ({
+            ...item,
+            winner: false,
+            isStart: true,
+            reelId: `multi-start-${index}-${item.instanceId || index}`,
+          }))
+        nextReels = [starts.length ? [...starts, ...reel] : reel]
+      } else {
+        nextReels = openings.map((opening, index) => {
+          const previous = startItems[index]
+          if (!previous) return opening.reel
+          const startItem = {
+            ...previous,
+            reelId: `start-${index}-${previous.instanceId || previous.id || Date.now()}`,
+            winner: false,
+            isStart: true,
+          }
+          // Несколько предметов перед стартовым, чтобы он встал ровно под
+          // указатель и лента поехала из того же места, где остановилась.
+          const leadCount = Math.min(20, opening.reel.length)
+          return [
+            ...opening.reel.slice(0, leadCount),
+            startItem,
+            ...opening.reel.slice(leadCount),
+          ]
+        })
+      }
       setReels(nextReels)
       setResults(winners)
       setSelectedIds(winners.map((winner) => winner.instanceId))
@@ -7064,6 +7139,8 @@ function CaseModal({
   }
 
   const compactReels = reels.length > 1
+  const multiMarkerCount =
+    results && results.length > 1 && reels.length === 1 ? results.length : 0
   const compactReelHeight = compactReels
     ? Math.max(
         38,
@@ -7326,9 +7403,26 @@ function CaseModal({
                           viewportRefs.current[reelIndex] = node
                         }}
                       >
-                        <div className="pointer-events-none absolute inset-y-0 left-1/2 z-20 w-px -translate-x-1/2 bg-acid/80 shadow-[0_0_12px_rgba(53,255,135,.85)]" />
-                        <div className="pointer-events-none absolute left-1/2 top-0 z-30 -translate-x-1/2 border-x-[6px] border-t-[7px] border-x-transparent border-t-acid" />
-                        <div className="pointer-events-none absolute bottom-0 left-1/2 z-30 -translate-x-1/2 border-x-[6px] border-b-[7px] border-x-transparent border-b-acid" />
+                        {multiMarkerCount > 1 ? (
+                          <div className="pointer-events-none absolute inset-0 z-20">
+                            {Array.from({ length: multiMarkerCount }).map((_, markerIndex) => (
+                              <span
+                                key={markerIndex}
+                                ref={(node) => {
+                                  markerRefs.current[markerIndex] = node
+                                }}
+                                className="absolute bottom-0 top-0 w-[2px] -translate-x-1/2 bg-acid shadow-[0_0_12px_rgba(53,255,135,.9)] transition-opacity duration-300"
+                                style={{ left: '50%' }}
+                              />
+                            ))}
+                          </div>
+                        ) : (
+                          <>
+                            <div className="pointer-events-none absolute inset-y-0 left-1/2 z-20 w-px -translate-x-1/2 bg-acid/80 shadow-[0_0_12px_rgba(53,255,135,.85)]" />
+                            <div className="pointer-events-none absolute left-1/2 top-0 z-30 -translate-x-1/2 border-x-[6px] border-t-[7px] border-x-transparent border-t-acid" />
+                            <div className="pointer-events-none absolute bottom-0 left-1/2 z-30 -translate-x-1/2 border-x-[6px] border-b-[7px] border-x-transparent border-b-acid" />
+                          </>
+                        )}
                         <div className="roulette-mask h-full">
                           <div
                             ref={(node) => {
@@ -7561,6 +7655,7 @@ function CaseModal({
                       const isSelected = selectedIds.includes(item.instanceId)
                       const jackpot =
                         caseData.price > 0 && item.price >= caseData.price * 2
+                      const net = caseData.price > 0 ? item.price - caseData.price : 0
                       return (
                         <button
                           key={item.instanceId}
@@ -7603,6 +7698,20 @@ function CaseModal({
                               </div>
                             </div>
                           </div>
+
+                          {caseData.price > 0 && !isSold && !isFailed && (
+                            <span
+                              className={cx(
+                                'absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-[10px] font-black tabular-nums shadow-[0_6px_20px_rgba(0,0,0,.45)]',
+                                net >= 0
+                                  ? 'bg-acid text-[#041007]'
+                                  : 'bg-[#ff4d6d] text-white',
+                              )}
+                            >
+                              {net >= 0 ? '+' : '-'}
+                              {formatPrice(Math.abs(net))}
+                            </span>
+                          )}
 
                           {isSelected && !isSold && !isFailed && (
                             <span className="absolute right-2 top-2 z-20 flex h-5 w-5 items-center justify-center rounded-full bg-acid text-[10px] font-black text-[#041007] shadow-[0_0_14px_rgba(53,255,135,.55)]">
