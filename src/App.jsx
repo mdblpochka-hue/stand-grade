@@ -7387,6 +7387,12 @@ function CaseModal({
                           ))}
                         </div>
                         <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#040905]/35 via-transparent to-[#040905]/25" />
+                        <div className="pointer-events-none absolute inset-x-0 top-1/2 z-20 -translate-y-1/2">
+                          <div className="relative h-px w-full bg-acid/80 shadow-[0_0_14px_rgba(53,255,135,.9)]">
+                            <span className="absolute -left-0.5 top-1/2 -translate-y-1/2 border-y-[5px] border-l-[7px] border-y-transparent border-l-acid" />
+                            <span className="absolute -right-0.5 top-1/2 -translate-y-1/2 border-y-[5px] border-r-[7px] border-y-transparent border-r-acid" />
+                          </div>
+                        </div>
                       </div>
                     )
                   })}
@@ -7698,6 +7704,10 @@ function CaseModal({
                               </div>
                             </div>
                           </div>
+
+                          {!isSold && !isFailed && (
+                            <span className="pointer-events-none absolute inset-x-2 top-1/2 z-[6] h-px -translate-y-1/2 bg-acid/45 shadow-[0_0_10px_rgba(53,255,135,.35)]" />
+                          )}
 
                           {caseData.price > 0 && !isSold && !isFailed && (
                             <span
