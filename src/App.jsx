@@ -14,6 +14,7 @@ import {
   isSoundEnabled,
   playCaseResult,
   playCoin,
+  playGlyphResult,
   playUpgradeResult,
   setSoundEnabled,
   startSpinSound,
@@ -1975,6 +1976,38 @@ function GlyphCardBack({ deck, className = '' }) {
   )
 }
 
+const GLYPH_CONFETTI_COLORS = ['#35ff87', '#ffcf4d', '#5effc9', '#c08bff', '#ff7ad9', '#ffffff']
+
+function glyphDropTier(glyphDrop) {
+  const cost = Number(glyphDrop?.cardPrice) || 0
+  const drops = glyphDrop?.drops || []
+  if (!cost || !drops.length) return 'loss'
+  if (drops.some((drop) => Number(drop.currentDrop?.price) >= cost * 2)) return 'jackpot'
+  if (drops.some((drop) => Number(drop.currentDrop?.price) > cost)) return 'profit'
+  return 'loss'
+}
+
+function GlyphConfetti() {
+  return (
+    <div className="pointer-events-none absolute inset-0 z-30 overflow-hidden rounded-[18px]">
+      {Array.from({ length: 18 }).map((_, index) => (
+        <span
+          key={index}
+          className="glyph-confetti absolute top-1 h-1.5 w-1 rounded-[1px]"
+          style={{
+            left: `${6 + index * 5.2}%`,
+            backgroundColor: GLYPH_CONFETTI_COLORS[index % GLYPH_CONFETTI_COLORS.length],
+            animationDelay: `${(index % 6) * 45}ms`,
+            '--dx': `${((index % 5) - 2) * 14}px`,
+            '--dy': `${120 + (index % 4) * 26}px`,
+            '--rot': `${((index % 7) - 3) * 120}deg`,
+          }}
+        />
+      ))}
+    </div>
+  )
+}
+
 function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   const session = user.glyphDrop || null
   const [activeDeckId, setActiveDeckId] = useState(null)
@@ -2008,6 +2041,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
     (sum, drop) => sum + drop.currentDrop.price,
     0,
   )
+  const jackpotAt = (Number(session?.cardPrice) || 0) * 2
   const resultsByDrop = new Map(
     upgradeResults.map((result) => [result.dropId, result]),
   )
@@ -2150,6 +2184,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       setSelectedDropIds([])
       resetUpgrade()
       setUpgradeMultiplier(2)
+      playGlyphResult(glyphDropTier(data.glyphDrop))
     } catch (requestError) {
       setError(requestError.message)
       onToast(requestError.message, 'error')
@@ -2203,6 +2238,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       onUpdate(data)
       setSelectedDropIds([])
       resetUpgrade()
+      playGlyphResult(glyphDropTier(data.glyphDrop))
     } catch (requestError) {
       setError(requestError.message)
       onToast(requestError.message, 'error')
@@ -2654,7 +2690,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                         justifyContent: 'center',
                       }}
                     >
-                      {drops.map((dropItem) => {
+                      {drops.map((dropItem, index) => {
                         const skin = dropItem.currentDrop
                         const meta = RARITY[skin.rarity] || RARITY.Common
                         const selected = selectedDropIds.includes(dropItem.id)
@@ -2668,10 +2704,15 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                           ((upgradePhase === 'confirm' && selected) ||
                             (upgradePhase === 'spinning' && Boolean(result)))
                         const showSuccess = upgradePhase === 'result' && Boolean(result?.won)
+                        const jackpot =
+                          !dropItem.failed &&
+                          jackpotAt > 0 &&
+                          Number(skin.price) >= jackpotAt
                         return (
                           <button
-                            key={dropItem.id}
+                            key={`${dropItem.id}-${dropItem.rollId || 'x'}`}
                             type="button"
+                            style={{ animationDelay: `${index * 45}ms` }}
                             onClick={() => toggleDrop(dropItem.id)}
                             disabled={
                               dropItem.failed ||
@@ -2679,7 +2720,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                               upgradePhase === 'spinning'
                             }
                             className={cx(
-                              'group relative aspect-[7/10] w-full overflow-hidden rounded-[18px] border text-left transition duration-200 disabled:cursor-default',
+                              'glyph-card-reveal group relative aspect-[7/10] w-full overflow-hidden rounded-[18px] border text-left transition duration-200 disabled:cursor-default',
                               selected && !dropItem.failed
                                 ? 'border-acid/65 shadow-[0_0_34px_rgba(53,255,135,.18)]'
                                 : 'border-white/[0.1]',
@@ -2763,6 +2804,10 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                                 )}
                               </div>
                             )}
+                            {jackpot && (
+                              <span className="glyph-jackpot-ring pointer-events-none absolute inset-0 z-10 rounded-[18px] ring-2 ring-[#ffcf4d]/60" />
+                            )}
+                            {jackpot && <GlyphConfetti />}
                           </button>
                         )
                       })}

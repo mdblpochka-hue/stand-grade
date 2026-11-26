@@ -595,6 +595,58 @@ select:focus-visible {
   animation: glyph-attempt-pulse 420ms ease-out;
 }
 
+@keyframes glyph-card-reveal {
+  0% {
+    opacity: 0;
+    transform: translateY(22px) scale(0.92);
+    filter: blur(8px);
+  }
+  55% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+.glyph-card-reveal {
+  animation: glyph-card-reveal 460ms cubic-bezier(0.16, 0.84, 0.3, 1) both;
+}
+
+@keyframes glyph-jackpot-ring {
+  0%,
+  100% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.glyph-jackpot-ring {
+  animation: glyph-jackpot-ring 1.5s ease-in-out 2;
+}
+
+@keyframes glyph-confetti-fall {
+  0% {
+    transform: translate3d(0, -8px, 0) rotate(0deg);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate3d(var(--dx, 0px), var(--dy, 150px), 0) rotate(var(--rot, 180deg));
+    opacity: 0;
+  }
+}
+
+.glyph-confetti {
+  animation: glyph-confetti-fall 1400ms cubic-bezier(0.18, 0.7, 0.3, 1) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

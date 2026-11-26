@@ -143,6 +143,42 @@ export function playUpgradeResult(won) {
   }
 }
 
+/**
+ * Результат открытия глифов:
+ * jackpot — дроп 2x+ (фанфары + искры), profit — окуп меньше 2x, loss — обычный проигрыш.
+ */
+export function playGlyphResult(tier = 'loss') {
+  if (!enabled) return
+  if (tier === 'jackpot') {
+    const notes = [523.25, 659.25, 783.99, 1046.5, 1318.51, 1567.98]
+    notes.forEach((freq, index) => {
+      tone({ freq, duration: 0.32, type: 'triangle', gain: 0.055, delay: index * 0.07 })
+    })
+    tone({ freq: 261.63, duration: 0.55, type: 'triangle', gain: 0.03 })
+    tone({ freq: 2093, duration: 0.5, type: 'sine', gain: 0.03, delay: 0.42 })
+    ;[2637.02, 3135.96, 3520].forEach((freq, index) => {
+      tone({ freq, duration: 0.16, type: 'sine', gain: 0.018, delay: 0.5 + index * 0.06 })
+    })
+    return
+  }
+  if (tier === 'profit') {
+    ;[659.25, 880, 1046.5].forEach((freq, index) => {
+      tone({ freq, duration: 0.22, type: 'sine', gain: 0.045, delay: index * 0.08 })
+    })
+    return
+  }
+  ;[233.08, 196].forEach((freq, index) => {
+    tone({
+      freq,
+      duration: 0.2,
+      type: 'triangle',
+      gain: 0.03,
+      slideTo: freq * 0.9,
+      delay: index * 0.09,
+    })
+  })
+}
+
 export function playCoin() {
   if (!enabled) return
   tone({ freq: 880, duration: 0.09, type: 'square', gain: 0.02 })

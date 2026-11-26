@@ -515,6 +515,89 @@ function makeRatioPool(casePrice) {
   })
 }
 
+/*
+ * Глифы: реже окупаются, но в среднем возвращают больше кейсов.
+ * Основная масса дропа — ниже стоимости печати, прибыльные предметы
+ * собраны в отдельные полосы (1–3x и тяжёлый хвост 3x+). RTP каждого
+ * глифа подгоняется бинарным поиском до GLYPH_TARGET_RTP.
+ */
+const GLYPH_LOSS_CENTER = 0.55
+const GLYPH_LOSS_SIGMA = 0.4
+const GLYPH_MID_CENTER = 1.5
+const GLYPH_MID_SIGMA = 0.42
+const GLYPH_TAIL_DECAY = 1.4
+const GLYPH_MID_AMP = 0.15
+const GLYPH_TAIL_AMP = 0.06
+const GLYPH_TARGET_RTP = 0.88
+const GLYPH_MIN_RATIO = 1 / 14
+
+function makeGlyphPool(price) {
+  const loss = []
+  const mid = []
+  const tail = []
+  let lossMass = 0
+  let midMass = 0
+  let tailShape = 0
+
+  for (const skin of SKINS) {
+    const ratio = skin.price / price
+    if (!Number.isFinite(ratio) || ratio < GLYPH_MIN_RATIO) continue
+    if (ratio < 1) {
+      const spread = Math.log(ratio) - Math.log(GLYPH_LOSS_CENTER)
+      const bell = Math.exp(
+        -(spread * spread) / (2 * GLYPH_LOSS_SIGMA * GLYPH_LOSS_SIGMA),
+      )
+      loss.push([skin, bell])
+      lossMass += bell
+    } else if (ratio < 3) {
+      const spread = Math.log(ratio) - Math.log(GLYPH_MID_CENTER)
+      const bell = Math.exp(
+        -(spread * spread) / (2 * GLYPH_MID_SIGMA * GLYPH_MID_SIGMA),
+      )
+      mid.push([skin, bell])
+      midMass += bell
+    } else {
+      const shape = 1 / Math.pow(ratio, GLYPH_TAIL_DECAY)
+      tail.push([skin, shape])
+      tailShape += shape
+    }
+  }
+
+  const lossAvg = lossMass / (loss.length || 1)
+  const entries = []
+  for (const [skin, bell] of loss) entries.push([skin, bell + lossAvg * 0.02, false])
+  const midScale = midMass > 0 ? (GLYPH_MID_AMP * lossMass) / midMass : 0
+  for (const [skin, bell] of mid) entries.push([skin, bell * midScale, true])
+  const tailScale = tailShape > 0 ? (GLYPH_TAIL_AMP * lossMass) / tailShape : 0
+  for (const [skin, shape] of tail) entries.push([skin, shape * tailScale, true])
+
+  const metrics = (boost) => {
+    let total = 0
+    let ev = 0
+    for (const [skin, weight, profit] of entries) {
+      const finalWeight = profit ? weight * boost : weight
+      total += finalWeight
+      ev += skin.price * finalWeight
+    }
+    return total > 0 ? ev / total / price : 0
+  }
+  let lo = 0.00001
+  let hi = 1000
+  for (let index = 0; index < 60; index += 1) {
+    const guess = (lo + hi) / 2
+    if (metrics(guess) < GLYPH_TARGET_RTP) lo = guess
+    else hi = guess
+  }
+  const boost = (lo + hi) / 2
+
+  return entries
+    .map(([skin, weight, profit]) => [
+      skin.id,
+      Math.round(weight * (profit ? boost : 1) * WEIGHT_SCALE),
+    ])
+    .filter(([, weight]) => weight >= 1)
+}
+
 const CASE_DEFS = [
   {
     id: 'free',
@@ -960,7 +1043,7 @@ const GLYPH_DECKS = [
 ]
 
 const GLYPHS = GLYPH_DECKS.map((deck) => {
-  const pool = makeRatioPool(deck.price)
+  const pool = makeGlyphPool(deck.price)
   const payload = buildCasePayload({ ...deck, pool })
   const maxFeaturedPrice = deck.price * 25
   const candidates = pool
