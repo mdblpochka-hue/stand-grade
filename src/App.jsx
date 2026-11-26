@@ -2172,7 +2172,9 @@ function glyphDropTier(glyphDrop) {
   const cost = Number(glyphDrop?.cardPrice) || 0
   return (
     dropProfitTier(
-      (glyphDrop?.drops || []).map((drop) => drop.currentDrop?.price),
+      (glyphDrop?.drops || [])
+        .filter((drop) => !drop.failed)
+        .map((drop) => drop.currentDrop?.price),
       cost,
     ) || 'loss'
   )
