@@ -100,7 +100,6 @@ const BATTLE_ROUND_OPTIONS = [1, 3, 5]
 const GLYPH_REROLLS = 5
 const GLYPH_UPGRADE_MULTIPLIERS = [2, 3, 5, 10]
 const GLYPH_OPEN_COUNTS = [1, 2, 3, 5, 10]
-const GLYPH_UPGRADE_EDGE = 90
 // Заявки: голда сверх дневного лимита и история заявок.
 const MAX_GOLD_REQUEST = Math.max(1000, Number(process.env.MAX_GOLD_REQUEST) || 100000)
 const APPLICATION_HISTORY_LIMIT = 500
@@ -1882,6 +1881,36 @@ function makeValuePool(targetValue) {
   return entries.length ? entries : [...SKINS].slice(0, 20).map((skin) => [skin.id, 1])
 }
 
+const SKINS_BY_PRICE = [...SKINS].sort(
+  (a, b) => a.price - b.price || String(a.id).localeCompare(String(b.id)),
+)
+
+function pickNearestSkinByPrice(targetValue) {
+  const target = Math.max(1, Number(targetValue) || 1)
+  let lo = 0
+  let hi = SKINS_BY_PRICE.length - 1
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1
+    if (SKINS_BY_PRICE[mid].price < target) lo = mid + 1
+    else hi = mid - 1
+  }
+  const candidates = []
+  if (lo < SKINS_BY_PRICE.length) candidates.push(SKINS_BY_PRICE[lo])
+  if (lo > 0) candidates.push(SKINS_BY_PRICE[lo - 1])
+  if (!candidates.length) return SKINS_BY_PRICE[SKINS_BY_PRICE.length - 1] || null
+  candidates.sort(
+    (a, b) => Math.abs(a.price - target) - Math.abs(b.price - target) || a.price - b.price,
+  )
+  return candidates[0]
+}
+
+function glyphUpgradeChance(basePrice, targetPrice) {
+  const base = Math.max(0, Number(basePrice) || 0)
+  const target = Math.max(1, Number(targetPrice) || 1)
+  const chance = (base / target) * 100
+  return Math.round(Math.min(95, Math.max(0.01, chance)) * 100) / 100
+}
+
 function publicGlyphDrop(user) {
   const session = user.glyphDrop
   const drops = Array.isArray(session?.drops) ? session.drops : []
@@ -1900,6 +1929,12 @@ function publicGlyphDrop(user) {
         rollId: drop.rollId || null,
         failed: Boolean(drop.failed),
         compensation: roundGold(Math.max(0, Number(drop.compensation) || 0)),
+        upgradeChances: Object.fromEntries(
+          GLYPH_UPGRADE_MULTIPLIERS.map((multiplier) => {
+            const target = pickNearestSkinByPrice(skin.price * multiplier)
+            return [multiplier, glyphUpgradeChance(skin.price, target?.price ?? skin.price)]
+          }),
+        ),
         net,
         netPercent: cardPrice > 0 ? roundGold((net / cardPrice) * 100) : 0,
       }
@@ -1927,10 +1962,6 @@ function publicGlyphDrop(user) {
     attemptsTotal: GLYPH_REROLLS,
     drops: publicDrops,
     createdAt: session.createdAt || null,
-    multipliers: GLYPH_UPGRADE_MULTIPLIERS.map((multiplier) => ({
-      multiplier,
-      chance: Math.round((GLYPH_UPGRADE_EDGE / multiplier) * 10) / 10,
-    })),
   }
 }
 
@@ -2868,19 +2899,22 @@ app.post('/api/glyph/upgrade', auth, (req, res) => {
     return sendError(res, 400, 'BAD_MULTIPLIER', 'Доступны апгрейды x2, x3, x5 и x10')
   }
 
-  const chance = Math.round((GLYPH_UPGRADE_EDGE / multiplier) * 10) / 10
   const results = []
   let wins = 0
   let losses = 0
-  let compensationTotal = 0
+  const compensationTotal = 0
 
   for (const drop of selected) {
     const baseSkin = SKIN_BY_ID.get(drop.currentDrop.id) || drop.currentDrop
+    const targetValue = Math.max(1, baseSkin.price * multiplier)
+    const targetSkin = pickNearestSkinByPrice(targetValue)
+    const chance = glyphUpgradeChance(
+      baseSkin.price,
+      targetSkin?.price ?? baseSkin.price,
+    )
     const roll = crypto.randomInt(0, 10000) / 100
-    const won = roll < chance
+    const won = roll < chance && Boolean(targetSkin)
     if (won) {
-      const targetValue = Math.max(1, baseSkin.price * multiplier)
-      const targetSkin = weightedPickFrom(makeValuePool(targetValue))
       drop.currentDrop = { ...targetSkin }
       drop.rollId = crypto.randomUUID()
       drop.upgraded = true
@@ -2893,27 +2927,25 @@ app.post('/api/glyph/upgrade', auth, (req, res) => {
         roll,
         baseSkin: { ...baseSkin },
         targetSkin: { ...targetSkin },
+        targetValue: roundGold(targetValue),
         compensation: 0,
       })
       wins += 1
     } else {
-      const compensation = roundGold(
-        baseSkin.price * (0.05 + crypto.randomInt(0, 501) / 10000),
-      )
-      user.balance = roundGold(user.balance + compensation)
       drop.failed = true
       drop.failedAt = new Date().toISOString()
-      drop.compensation = compensation
+      drop.compensation = 0
       results.push({
         dropId: drop.id,
         won: false,
         chance,
         roll,
         baseSkin: { ...baseSkin },
-        compensation,
+        targetSkin: targetSkin ? { ...targetSkin } : null,
+        targetValue: roundGold(targetValue),
+        compensation: 0,
       })
       losses += 1
-      compensationTotal = roundGold(compensationTotal + compensation)
     }
   }
 
@@ -2926,7 +2958,7 @@ app.post('/api/glyph/upgrade', auth, (req, res) => {
   return res.json({
     ok: true,
     multiplier,
-    chance,
+    chance: results[0]?.chance ?? 0,
     results,
     wins,
     losses,

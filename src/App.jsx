@@ -2008,7 +2008,6 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
     (sum, drop) => sum + drop.currentDrop.price,
     0,
   )
-  const upgradeChance = Math.round((90 / (upgradeMultiplier || 2)) * 10) / 10
   const resultsByDrop = new Map(
     upgradeResults.map((result) => [result.dropId, result]),
   )
@@ -2660,7 +2659,10 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                         const meta = RARITY[skin.rarity] || RARITY.Common
                         const selected = selectedDropIds.includes(dropItem.id)
                         const result = resultsByDrop.get(dropItem.id)
-                        const chance = result?.chance ?? upgradeChance
+                        const chance =
+                          result?.chance ??
+                          dropItem.upgradeChances?.[upgradeMultiplier] ??
+                          0
                         const showWheel =
                           !dropItem.failed &&
                           ((upgradePhase === 'confirm' && selected) ||
