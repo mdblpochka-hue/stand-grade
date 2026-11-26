@@ -6708,6 +6708,7 @@ function CaseModal({
   onToast,
   onDonate,
   onGoInventory,
+  onToggleFast,
 }) {
   const [count, setCount] = useState(1)
   const [reels, setReels] = useState(() => [makePreviewReel(caseData)])
@@ -6716,6 +6717,9 @@ function CaseModal({
   const [results, setResults] = useState(null)
   const [showResult, setShowResult] = useState(false)
   const [soldIds, setSoldIds] = useState([])
+  const [selectedIds, setSelectedIds] = useState([])
+  const [upgradeMultiplier, setUpgradeMultiplier] = useState(2)
+  const [upgrading, setUpgrading] = useState(false)
   const [selling, setSelling] = useState(false)
   const [error, setError] = useState('')
   const [now, setNow] = useState(() => Date.now())
@@ -6736,10 +6740,26 @@ function CaseModal({
     isFree && user.nextFreeCaseAt ? Math.max(0, new Date(user.nextFreeCaseAt).getTime() - now) : 0
   const freeLocked = freeCooldownIn > 0 && !user.unlimitedFreeCase
   const soldSet = new Set(soldIds)
-  const unsoldResults = (results || []).filter((item) => !soldSet.has(item.instanceId))
+  const unsoldResults = (results || []).filter(
+    (item) => !soldSet.has(item.instanceId) && !item.failed,
+  )
   const unsoldValue = unsoldResults.reduce((sum, item) => sum + item.price, 0)
   const totalValue = (results || []).reduce((sum, item) => sum + item.price, 0)
   const remainingCount = unsoldResults.length
+  const selectedResults = unsoldResults.filter((item) =>
+    selectedIds.includes(item.instanceId),
+  )
+  const selectedValue = selectedResults.reduce((sum, item) => sum + item.price, 0)
+  const resultGridClass =
+    (results || []).length <= 1
+      ? 'grid-cols-1 max-w-[340px]'
+      : (results || []).length === 2
+        ? 'grid-cols-2 max-w-[620px]'
+        : (results || []).length === 3
+          ? 'grid-cols-2 max-w-[900px] sm:grid-cols-3'
+          : (results || []).length === 4
+            ? 'grid-cols-2 max-w-[1100px] sm:grid-cols-4'
+            : 'grid-cols-2 max-w-[1220px] sm:grid-cols-3 lg:grid-cols-5'
 
   useEffect(() => {
     if (!isFree || !user.nextFreeCaseAt) return undefined
@@ -6748,8 +6768,8 @@ function CaseModal({
   }, [isFree, user.nextFreeCaseAt])
 
   const requestClose = useCallback(() => {
-    if (!spinning) onClose()
-  }, [spinning, onClose])
+    if (!spinning && !upgrading) onClose()
+  }, [spinning, upgrading, onClose])
 
   useEscape(requestClose, true)
 
@@ -6828,6 +6848,8 @@ function CaseModal({
     setShowResult(false)
     setResults(null)
     setSoldIds([])
+    setSelectedIds([])
+    setUpgrading(false)
     setError('')
     setReels([makePreviewReel(caseData)])
   }
@@ -6840,6 +6862,8 @@ function CaseModal({
     setShowResult(false)
     setResults(null)
     setSoldIds([])
+    setSelectedIds([])
+    setUpgrading(false)
     try {
       const data = await apiRequest('/api/open-case', {
         method: 'POST',
@@ -6850,8 +6874,10 @@ function CaseModal({
         ? data.openings
         : [{ winner: data.winner, reel: data.reel }]
       onUpdate(data)
+      const winners = openings.map((opening) => opening.winner)
       setReels(openings.map((opening) => opening.reel))
-      setResults(openings.map((opening) => opening.winner))
+      setResults(winners)
+      setSelectedIds(winners.map((winner) => winner.instanceId))
       setSpinning(true)
     } catch (requestError) {
       setError(requestError.message)
@@ -6866,6 +6892,8 @@ function CaseModal({
     setShowResult(false)
     setResults(null)
     setSoldIds([])
+    setSelectedIds([])
+    setUpgrading(false)
     setError('')
     setReels([makePreviewReel(caseData)])
     trackRefs.current.forEach((track) => {
@@ -6882,8 +6910,8 @@ function CaseModal({
   }
 
   async function sellPrize() {
-    if (!results?.length || selling || freeLocked) return
-    const targets = unsoldResults
+    if (!results?.length || selling || upgrading || freeLocked) return
+    const targets = selectedResults
     if (!targets.length) return
     setSelling(true)
     try {
@@ -6901,12 +6929,79 @@ function CaseModal({
             })
       onUpdate(data)
       setSoldIds((previous) => [...previous, ...targets.map((item) => item.instanceId)])
+      setSelectedIds((previous) =>
+        previous.filter((id) => !targets.some((item) => item.instanceId === id)),
+      )
       playCoin()
       onToast(data.message, 'success')
     } catch (requestError) {
       onToast(requestError.message, 'error')
     } finally {
       setSelling(false)
+    }
+  }
+
+  function toggleCaseSelect(instanceId) {
+    if (upgrading) return
+    setSelectedIds((previous) =>
+      previous.includes(instanceId)
+        ? previous.filter((id) => id !== instanceId)
+        : [...previous, instanceId],
+    )
+  }
+
+  function toggleCaseSelectAll() {
+    if (upgrading) return
+    setSelectedIds((previous) =>
+      previous.length === unsoldResults.length
+        ? []
+        : unsoldResults.map((item) => item.instanceId),
+    )
+  }
+
+  async function upgradeSelected() {
+    if (upgrading || selling || !selectedResults.length) return
+    setUpgrading(true)
+    setError('')
+    unlockAudio()
+    try {
+      const data = await apiRequest('/api/upgrade-many', {
+        method: 'POST',
+        token,
+        body: {
+          instanceIds: selectedResults.map((item) => item.instanceId),
+          multiplier: upgradeMultiplier,
+        },
+      })
+      onUpdate(data)
+      const byInstance = new Map(
+        (data.results || []).map((result) => [result.instanceId, result]),
+      )
+      setResults((previous) =>
+        (previous || []).map((item) => {
+          const result = byInstance.get(item.instanceId)
+          if (!result) return item
+          if (result.won && result.targetSkin) {
+            return {
+              ...result.targetSkin,
+              instanceId: result.newInstanceId,
+              upgraded: true,
+              upgradeMultiplier,
+            }
+          }
+          return { ...item, failed: true }
+        }),
+      )
+      const survivors = (data.results || [])
+        .filter((result) => result.won && result.newInstanceId)
+        .map((result) => result.newInstanceId)
+      setSelectedIds(survivors)
+      playUpgradeResult((data.wins || 0) > 0)
+      onToast(data.message, data.wins > 0 ? 'success' : 'error')
+    } catch (requestError) {
+      onToast(requestError.message, 'error')
+    } finally {
+      setUpgrading(false)
     }
   }
 
@@ -6993,7 +7088,7 @@ function CaseModal({
 
         <div className="no-scrollbar flex-1 overflow-y-auto">
           <div className="p-3 sm:p-5">
-            {caseData.price > 0 && (
+            {caseData.price > 0 && !showResult && (
               <div className="relative mb-3 overflow-hidden rounded-2xl border border-acid/12 bg-[#08120c] p-3 sm:p-4">
                 <div className="absolute inset-0 bg-grid-faint opacity-15" />
                 <div
@@ -7080,6 +7175,8 @@ function CaseModal({
 
             <div className="relative overflow-hidden rounded-2xl border border-white/[0.08] bg-[#060a07] p-3 sm:p-4">
               <div className="absolute inset-0 bg-grid-faint opacity-20" />
+              {!showResult && (
+                <>
               <div className="relative mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <span className="live-dot h-1.5 w-1.5 rounded-full bg-acid" />
@@ -7251,6 +7348,8 @@ function CaseModal({
                   )
                 })}
               </div>
+                </>
+              )}
 
               {!showResult && (
                 <div className="relative mt-3 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
@@ -7296,84 +7395,9 @@ function CaseModal({
                 </div>
               )}
 
-              {showResult && results?.length === 1 && single && (
-                <div className="pop-in relative mt-3 overflow-hidden rounded-xl border border-acid/25 bg-[#0c1710] p-3 sm:p-4">
-                  <div className="absolute -right-16 -top-20 h-56 w-56 rounded-full bg-acid/12 blur-3xl" />
-                  <div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <div className="relative h-[74px] w-[96px] shrink-0 overflow-hidden rounded-xl border border-acid/25">
-                        <SkinVisual skin={single} className="h-full w-full" showRarity={false} />
-                        {singleJackpot && (
-                          <span className="glyph-jackpot-ring pointer-events-none absolute inset-0 z-10 rounded-xl ring-2 ring-[#ffcf4d]/70" />
-                        )}
-                        {singleJackpot && <GlyphConfetti />}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-[8px] font-black uppercase tracking-[0.15em] text-acid">
-                            Вам выпало
-                          </span>
-                          {singleJackpot && (
-                            <span className="rounded-md bg-[#ffcf4d] px-1.5 py-0.5 text-[7px] font-black uppercase tracking-[0.06em] text-[#221800]">
-                              x2+
-                            </span>
-                          )}
-                          <RarityBadge rarity={single.rarity} />
-                        </div>
-                        <h3 className="mt-1.5 truncate font-display text-[15px] font-extrabold tracking-[-0.03em] text-white sm:text-[18px]">
-                          {single.name}
-                        </h3>
-                        <div className="mt-1 flex items-center gap-2 text-[9px] font-bold text-white/35">
-                          <span>{single.weapon}</span>
-                          <span className="text-white/12">·</span>
-                          <span className="text-acid">{formatPrice(single.price)}</span>
-                          <span className="text-white/12">·</span>
-                          <span>{soldSet.has(single.instanceId) ? 'продано' : 'в инвентаре'}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      <button
-                        type="button"
-                        onClick={sellPrize}
-                        disabled={soldSet.has(single.instanceId) || selling}
-                        className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-acid/25 bg-acid/[0.08] px-3 py-2.5 text-[9px] font-extrabold text-acid transition hover:bg-acid hover:text-[#041007] disabled:opacity-40 sm:flex-none"
-                      >
-                        {selling ? (
-                          <span className="spin-ring h-3 w-3 rounded-full border-2 border-current/30 border-t-current" />
-                        ) : (
-                          <Icon name="tag" size={12} />
-                        )}
-                        {soldSet.has(single.instanceId)
-                          ? 'Продано'
-                          : `Продать за ${formatPrice(single.price)}`}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={goInventory}
-                        className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-white/[0.09] bg-white/[0.04] px-3 py-2.5 text-[9px] font-extrabold text-white/60 transition hover:text-white sm:flex-none"
-                      >
-                        <Icon name="archive" size={12} />
-                        В инвентарь
-                      </button>
-                      <button
-                        type="button"
-                        onClick={spinAgain}
-                        disabled={!canAfford || freeLocked}
-                        className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-white/[0.09] bg-white/[0.04] px-3 py-2.5 text-[9px] font-extrabold text-white/60 transition hover:border-acid/25 hover:text-acid disabled:opacity-30 sm:flex-none"
-                      >
-                        <Icon name="refresh" size={12} />
-                        Ещё
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {showResult && results && results.length > 1 && (
-                <div className="pop-in relative mt-3 overflow-hidden rounded-xl border border-acid/25 bg-[#0c1710] p-3 sm:p-4">
-                  <div className="absolute -right-16 -top-20 h-56 w-56 rounded-full bg-acid/12 blur-3xl" />
-                  <div className="relative flex flex-wrap items-center justify-between gap-2">
+              {showResult && results?.length > 0 && (
+                <div className="relative">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <span className="text-[8px] font-black uppercase tracking-[0.15em] text-acid">
                         Вам выпало
@@ -7385,101 +7409,181 @@ function CaseModal({
                         {formatPrice(totalValue)}
                       </span>
                     </div>
-                    {soldIds.length > 0 && (
-                      <span className="text-[8px] font-bold uppercase tracking-[0.1em] text-white/30">
-                        продано {soldIds.length} из {results.length}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {soldIds.length > 0 && (
+                        <span className="text-[8px] font-bold uppercase tracking-[0.1em] text-white/30">
+                          продано {soldIds.length}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={toggleCaseSelectAll}
+                        disabled={upgrading || !unsoldResults.length}
+                        className="h-8 rounded-lg border border-white/[0.1] bg-white/[0.03] px-3 text-[8px] font-black uppercase tracking-[0.06em] text-white/45 transition hover:border-white/25 hover:text-white disabled:opacity-30"
+                      >
+                        {selectedIds.length === unsoldResults.length ? 'Снять выбор' : 'Выбрать все'}
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="relative mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+                  <div className={cx('mx-auto grid gap-2 sm:gap-3', resultGridClass)}>
                     {results.map((item, index) => {
                       const meta = RARITY[item.rarity] || RARITY.Common
                       const isSold = soldSet.has(item.instanceId)
+                      const isFailed = Boolean(item.failed)
+                      const isSelected = selectedIds.includes(item.instanceId)
                       const jackpot =
                         caseData.price > 0 && item.price >= caseData.price * 2
                       return (
-                        <div
+                        <button
                           key={item.instanceId}
+                          type="button"
+                          onClick={() => toggleCaseSelect(item.instanceId)}
+                          disabled={isSold || isFailed || upgrading}
+                          style={{ animationDelay: `${index * 40}ms` }}
                           className={cx(
-                            'glyph-card-reveal relative overflow-hidden rounded-lg border bg-black/25 transition',
-                            isSold ? 'opacity-40' : '',
+                            'glyph-card-reveal group relative aspect-[7/10] w-full overflow-hidden rounded-[18px] border text-left transition duration-200 disabled:cursor-default',
+                            isSelected && !isSold && !isFailed
+                              ? 'border-acid/65 shadow-[0_0_34px_rgba(53,255,135,.18)]'
+                              : 'border-white/[0.1]',
+                            !isSold &&
+                              !isFailed &&
+                              !upgrading &&
+                              'hover:-translate-y-0.5 hover:border-white/25',
                           )}
-                          style={{
-                            borderColor: jackpot ? 'rgba(255,207,77,.65)' : `${meta.color}30`,
-                            animationDelay: `${index * 40}ms`,
-                          }}
                         >
-                          <SkinVisual skin={item} className="h-16 w-full" showRarity={false} />
-                          {jackpot && (
-                            <span className="glyph-jackpot-ring pointer-events-none absolute inset-0 z-10 rounded-lg ring-2 ring-[#ffcf4d]/70" />
-                          )}
-                          {jackpot && !isSold && <GlyphConfetti />}
-                          {jackpot && (
-                            <span className="absolute left-1.5 top-1.5 z-20 rounded bg-[#ffcf4d] px-1 py-0.5 text-[6px] font-black uppercase tracking-[0.04em] text-[#221800]">
-                              x2+
-                            </span>
-                          )}
-                          <div className="p-2">
-                            <div className="truncate text-[8px] font-extrabold text-white/80">{item.name}</div>
-                            <div className="mt-0.5 flex items-center justify-between gap-1">
-                              <span
-                                className="truncate text-[6.5px] font-black uppercase tracking-[0.06em]"
-                                style={{ color: meta.color }}
-                              >
-                                {meta.label}
-                              </span>
-                              <span className="shrink-0 text-[8px] font-bold tabular-nums text-white/40">
+                          <div className="absolute inset-0">
+                            <SkinVisual skin={item} className="h-full w-full" showRarity={false} />
+                          </div>
+                          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#040905]/90 via-[#040905]/5 to-[#040905]/50" />
+                          <div className="relative flex h-full flex-col p-2 sm:p-2.5">
+                            <div className="flex justify-center">
+                              <span className="rounded-md border border-white/[0.12] bg-black/45 px-2 py-0.5 text-[10px] font-black tabular-nums text-white/85 backdrop-blur-sm">
                                 {formatPrice(item.price)}
                               </span>
                             </div>
+                            <div className="mt-auto text-center">
+                              <div className="text-[7px] font-black uppercase tracking-[0.18em] text-white/45">
+                                {item.weapon || meta.label}
+                              </div>
+                              <div className="mt-0.5 truncate text-[11px] font-extrabold leading-tight text-white">
+                                {item.baseName || item.name}
+                              </div>
+                            </div>
                           </div>
-                          {isSold && (
-                            <span className="absolute inset-x-0 top-1/2 -translate-y-1/2 bg-[#041007]/70 py-1 text-center text-[7px] font-black uppercase tracking-[0.1em] text-acid">
-                              продано
+
+                          {isSelected && !isSold && !isFailed && (
+                            <span className="absolute right-2 top-2 z-20 flex h-5 w-5 items-center justify-center rounded-full bg-acid text-[10px] font-black text-[#041007] shadow-[0_0_14px_rgba(53,255,135,.55)]">
+                              ✓
                             </span>
                           )}
-                        </div>
+                          {jackpot && !isSold && !isFailed && (
+                            <span className="glyph-jackpot-ring pointer-events-none absolute inset-0 z-10 rounded-[18px] ring-2 ring-[#ffcf4d]/60" />
+                          )}
+                          {jackpot && !isSold && !isFailed && <GlyphConfetti />}
+                          {item.upgraded && !isFailed && (
+                            <span className="absolute left-2 top-2 z-20 rounded-md bg-acid px-1.5 py-0.5 text-[7px] font-black uppercase tracking-[0.06em] text-[#041007]">
+                              успех x{item.upgradeMultiplier || upgradeMultiplier}
+                            </span>
+                          )}
+                          {isSold && (
+                            <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#030805]/65 backdrop-blur-sm">
+                              <span className="rounded-md bg-[#041007]/85 px-2 py-1 text-[8px] font-black uppercase tracking-[0.1em] text-acid">
+                                продано
+                              </span>
+                            </div>
+                          )}
+                          {isFailed && (
+                            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#030805]/65 px-2 text-center backdrop-blur-md">
+                              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#ff4d6d] text-[18px] font-black leading-none text-white shadow-[0_0_18px_rgba(255,77,109,.45)]">
+                                ×
+                              </span>
+                              <div className="mt-2 text-[9px] font-extrabold text-white">
+                                Апгрейд не прошёл
+                              </div>
+                            </div>
+                          )}
+                        </button>
                       )
                     })}
                   </div>
 
-                  <div className="relative mt-3 flex flex-wrap gap-1.5">
+                  <div className="sticky bottom-0 z-20 -mx-3 -mb-3 mt-3 flex flex-wrap items-center gap-2 border-t border-white/[0.07] bg-[#060a07]/95 px-3 py-3 backdrop-blur sm:-mx-4 sm:-mb-4 sm:px-4">
+                    <div className="flex shrink-0 gap-1.5">
+                      {[2, 3, 5, 10].map((multiplier) => (
+                        <button
+                          key={multiplier}
+                          type="button"
+                          onClick={() => setUpgradeMultiplier(multiplier)}
+                          disabled={upgrading || selling}
+                          className={cx(
+                            'h-9 w-11 rounded-lg border text-[10px] font-black tabular-nums transition disabled:opacity-40',
+                            upgradeMultiplier === multiplier
+                              ? 'border-acid/60 bg-acid/[0.12] text-acid'
+                              : 'border-white/[0.1] bg-white/[0.03] text-white/45 hover:border-white/25 hover:text-white',
+                          )}
+                        >
+                          x{multiplier}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center justify-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={requestClose}
+                        disabled={upgrading}
+                        className="h-9 rounded-lg border border-white/[0.12] bg-white/[0.04] px-5 text-[9px] font-black uppercase tracking-[0.08em] text-white/75 transition hover:bg-white/[0.08] disabled:opacity-35"
+                      >
+                        Забрать
+                      </button>
+                      <button
+                        type="button"
+                        onClick={sellPrize}
+                        disabled={!selectedResults.length || selling || upgrading}
+                        className="h-9 rounded-lg border border-[#ffcf4d]/25 bg-[#ffcf4d]/[0.06] px-5 text-[9px] font-black uppercase tracking-[0.08em] text-[#ffe6a3] transition hover:bg-[#ffcf4d]/[0.12] disabled:opacity-35"
+                      >
+                        {selling ? 'Продаём...' : `Продать ${formatPrice(selectedValue)}`}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={upgradeSelected}
+                        disabled={!selectedResults.length || upgrading || selling}
+                        className="h-9 rounded-lg border border-acid/60 bg-acid px-6 text-[9px] font-black uppercase tracking-[0.1em] text-[#041007] shadow-[0_0_24px_rgba(53,255,135,.28)] transition hover:bg-[#5cffa0] disabled:opacity-40"
+                      >
+                        {upgrading ? 'Апгрейдим...' : 'Апгрейд'}
+                      </button>
+                    </div>
+
                     <button
                       type="button"
-                      onClick={sellPrize}
-                      disabled={!remainingCount || selling}
-                      className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-acid/25 bg-acid/[0.08] px-3 py-2.5 text-[9px] font-extrabold text-acid transition hover:bg-acid hover:text-[#041007] disabled:opacity-40 sm:flex-none"
-                    >
-                      {selling ? (
-                        <span className="spin-ring h-3 w-3 rounded-full border-2 border-current/30 border-t-current" />
-                      ) : (
-                        <Icon name="tag" size={12} />
+                      onClick={onToggleFast}
+                      className={cx(
+                        'flex h-9 shrink-0 items-center gap-1.5 rounded-lg border px-3 text-[8px] font-black uppercase tracking-[0.06em] transition',
+                        fast
+                          ? 'border-[#ffcf4d]/50 bg-[#ffcf4d]/10 text-[#ffe6a3]'
+                          : 'border-white/[0.1] bg-white/[0.03] text-white/45 hover:border-white/25 hover:text-white',
                       )}
-                      {remainingCount
-                        ? `Продать всё за ${formatPrice(unsoldValue)}`
-                        : 'Всё продано'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={goInventory}
-                      className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-white/[0.09] bg-white/[0.04] px-3 py-2.5 text-[9px] font-extrabold text-white/60 transition hover:text-white sm:flex-none"
                     >
-                      <Icon name="archive" size={12} />
-                      В инвентарь
-                    </button>
-                    <button
-                      type="button"
-                      onClick={spinAgain}
-                      disabled={!canAfford || freeLocked}
-                      className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-white/[0.09] bg-white/[0.04] px-3 py-2.5 text-[9px] font-extrabold text-white/60 transition hover:border-acid/25 hover:text-acid disabled:opacity-30 sm:flex-none"
-                    >
-                      <Icon name="refresh" size={12} />
-                      Ещё ×{effectiveCount}
+                      ⚡ Быстро
+                      <span
+                        className={cx(
+                          'flex h-3.5 w-6 items-center rounded-full p-0.5 transition',
+                          fast ? 'bg-[#ffcf4d]/70' : 'bg-white/15',
+                        )}
+                      >
+                        <span
+                          className={cx(
+                            'h-2.5 w-2.5 rounded-full bg-white transition',
+                            fast && 'translate-x-2.5',
+                          )}
+                        />
+                      </span>
                     </button>
                   </div>
                 </div>
               )}
+
 
               {error && (
                 <div className="mt-3 flex items-center gap-2 rounded-lg border border-[#ff7189]/20 bg-[#ff7189]/[0.05] px-3 py-2 text-[9px] font-semibold text-[#ff9aac]">
@@ -10049,6 +10153,7 @@ export default function App() {
           onToast={pushToast}
           onDonate={() => setDonateOpen(true)}
           onGoInventory={() => navigate('inventory')}
+          onToggleFast={toggleFast}
         />
       )}
 

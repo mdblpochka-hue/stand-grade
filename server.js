@@ -125,6 +125,7 @@ const SECURITY_SENSITIVE_PATHS = new Set([
   '/api/glyph/sell',
   '/api/glyph/upgrade',
   '/api/upgrade',
+  '/api/upgrade-many',
   '/api/craft',
   '/api/case-battle',
   '/api/buy-skin',
@@ -2474,6 +2475,7 @@ app.use(
     '/api/glyph/sell',
     '/api/glyph/upgrade',
     '/api/upgrade',
+    '/api/upgrade-many',
     '/api/craft',
     '/api/case-battle',
     '/api/buy-skin',
@@ -3069,6 +3071,86 @@ app.post('/api/glyph/upgrade', auth, (req, res) => {
     user: publicUser(user),
     daily: buildDaily(),
     message: `x${multiplier}: успешно ${wins} из ${selected.length}${compensationTotal > 0 ? ` · компенсация +${formatGold(compensationTotal)}` : ''}${losses > 0 ? ' · замены сгорели' : ''}${remaining > 0 ? ` · осталось карт: ${remaining}` : ''}`,
+  })
+})
+
+app.post('/api/upgrade-many', auth, (req, res) => {
+  const user = req.user
+  const rawIds = Array.isArray(req.body?.instanceIds)
+    ? req.body.instanceIds.map(String)
+    : [String(req.body?.instanceId || '')].filter(Boolean)
+  const ids = [...new Set(rawIds)]
+  if (!ids.length) return sendError(res, 400, 'NO_ITEM', 'Выбери хотя бы один предмет')
+  if (ids.length > 10) {
+    return sendError(res, 400, 'TOO_MANY_ITEMS', 'В одном апгрейде можно использовать до 10 предметов')
+  }
+
+  const multiplier = Math.trunc(Number(req.body?.multiplier))
+  if (!GLYPH_UPGRADE_MULTIPLIERS.includes(multiplier)) {
+    return sendError(res, 400, 'BAD_MULTIPLIER', 'Доступны апгрейды x2, x3, x5 и x10')
+  }
+
+  const entries = ids.map((id) => user.inventory.find((item) => item.instanceId === id))
+  if (entries.some((entry) => !entry)) {
+    return sendError(res, 404, 'ITEM_NOT_FOUND', 'Предмет не найден в инвентаре')
+  }
+
+  const results = []
+  let wins = 0
+  let losses = 0
+
+  for (const entry of entries) {
+    const baseSkin = SKIN_BY_ID.get(entry.skinId)
+    if (!baseSkin) {
+      results.push({ instanceId: entry.instanceId, won: false, chance: 0 })
+      losses += 1
+      continue
+    }
+    const targetValue = Math.max(1, baseSkin.price * multiplier)
+    const targetSkin = pickNearestSkinByPrice(targetValue)
+    const chance = glyphUpgradeChance(baseSkin.price, targetSkin?.price ?? baseSkin.price)
+    const roll = crypto.randomInt(0, 10000) / 100
+    const won = roll < chance && Boolean(targetSkin)
+    user.inventory = user.inventory.filter((item) => item.instanceId !== entry.instanceId)
+    if (won) {
+      const newEntry = makeInventoryEntry(targetSkin)
+      user.inventory.unshift(newEntry)
+      results.push({
+        instanceId: entry.instanceId,
+        newInstanceId: newEntry.instanceId,
+        won: true,
+        chance,
+        roll,
+        baseSkin: { ...baseSkin },
+        targetSkin: { ...targetSkin },
+        targetValue: roundGold(targetValue),
+      })
+      wins += 1
+    } else {
+      results.push({
+        instanceId: entry.instanceId,
+        won: false,
+        chance,
+        roll,
+        baseSkin: { ...baseSkin },
+        targetSkin: targetSkin ? { ...targetSkin } : null,
+        targetValue: roundGold(targetValue),
+      })
+      losses += 1
+    }
+  }
+
+  saveState()
+
+  return res.json({
+    ok: true,
+    multiplier,
+    results,
+    wins,
+    losses,
+    user: publicUser(user),
+    daily: buildDaily(),
+    message: `x${multiplier}: успешно ${wins} из ${ids.length}`,
   })
 })
 
