@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { formatCs2Price } from './currency'
 import { rarityLabel } from './cases'
 
 const ICON_PATHS = {
@@ -264,6 +263,3 @@ export function formatChance(value) {
   return `${number.toFixed(3)}%`
 }
 
-export function cs2Price(coins, currency) {
-  return formatCs2Price(coins, currency)
-}

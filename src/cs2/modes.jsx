@@ -1187,5 +1187,3 @@ export function Cs2ResultModal({ result, format, onClose, title = 'Резуль�
     </div>
   )
 }
-
-export { StatCard, FilterChip, SearchInput, EmptyState, CATEGORY_LABELS, RARITY_FILTERS }
