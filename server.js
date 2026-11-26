@@ -1236,6 +1236,9 @@ function migrateUser(user) {
         0,
         Math.min(GLYPH_REROLLS, Math.trunc(attempts)),
       )
+      if (user.glyphDrop.drops.some((drop) => drop.failed)) {
+        user.glyphDrop.attemptsLeft = 0
+      }
       user.glyphDrop.drops.forEach((drop) => {
         delete drop.attemptsLeft
       })
@@ -2727,6 +2730,9 @@ app.post('/api/glyph/reroll', auth, (req, res) => {
   const user = req.user
   const session = user.glyphDrop
   if (!session?.drops?.length) return sendError(res, 409, 'NO_GLYPH_DROP', 'Сначала открой глиф')
+  if (session.drops.some((drop) => drop.failed)) {
+    return sendError(res, 400, 'REROLL_BURNED', 'После неудачного апгрейда замены сгорают')
+  }
   const attemptsLeft = Math.max(0, Math.trunc(Number(session.attemptsLeft) || 0))
   if (attemptsLeft <= 0) {
     return sendError(res, 400, 'NO_ATTEMPTS', 'Перекруты закончились — забери, продай или отправь дроп в апгрейд')
@@ -2911,6 +2917,9 @@ app.post('/api/glyph/upgrade', auth, (req, res) => {
     }
   }
 
+  const attemptsBurned = losses > 0 && session.attemptsLeft > 0
+  if (losses > 0) session.attemptsLeft = 0
+
   saveState()
 
   const remaining = session.drops.filter((drop) => !drop.failed).length
@@ -2921,13 +2930,14 @@ app.post('/api/glyph/upgrade', auth, (req, res) => {
     results,
     wins,
     losses,
+    attemptsBurned,
     compensationTotal,
     selectedCount: selected.length,
     glyphDrop: publicGlyphDrop(user),
     remaining,
     user: publicUser(user),
     daily: buildDaily(),
-    message: `x${multiplier}: успешно ${wins} из ${selected.length}${compensationTotal > 0 ? ` · компенсация +${formatGold(compensationTotal)}` : ''}${remaining > 0 ? ` · осталось карт: ${remaining}` : ''}`,
+    message: `x${multiplier}: успешно ${wins} из ${selected.length}${compensationTotal > 0 ? ` · компенсация +${formatGold(compensationTotal)}` : ''}${losses > 0 ? ' · замены сгорели' : ''}${remaining > 0 ? ` · осталось карт: ${remaining}` : ''}`,
   })
 })
 

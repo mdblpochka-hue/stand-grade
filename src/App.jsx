@@ -1999,6 +1999,8 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   const selectableDrops = drops.filter((drop) => !drop.failed)
   const selectedDrops = selectableDrops.filter((drop) => selectedDropIds.includes(drop.id))
   const hasFailed = drops.some((drop) => drop.failed)
+  const canReroll = Boolean(session && session.attemptsLeft > 0 && !hasFailed)
+  const resultLosses = upgradeResults.filter((result) => !result.won).length
   const selectedValue = selectedDrops.reduce(
     (sum, drop) => sum + drop.currentDrop.price,
     0,
@@ -2034,6 +2036,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
     const stopSound = startSpinSound(upgradeDuration, 'upgrade')
     stopSoundRef.current = stopSound
     const wins = upgradeResults.filter((result) => result.won).length
+    const losses = upgradeResults.length - wins
     const compensationTotal = upgradeResults.reduce(
       (sum, result) => sum + (Number(result.compensation) || 0),
       0,
@@ -2054,7 +2057,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       setUpgradePhase('result')
       playUpgradeResult(wins > 0)
       onToast(
-        `x${upgradeMultiplier}: успешно ${wins} из ${upgradeResults.length}${compensationTotal > 0 ? ` · компенсация +${formatPrice(compensationTotal)}` : ''}`,
+        `x${upgradeMultiplier}: успешно ${wins} из ${upgradeResults.length}${compensationTotal > 0 ? ` · компенсация +${formatPrice(compensationTotal)}` : ''}${losses > 0 ? ' · замены сгорели' : ''}`,
         wins > 0 ? 'success' : 'error',
       )
     }, upgradeDuration + 120)
@@ -2150,7 +2153,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   }
 
   async function rerollDrop() {
-    if (!session || session.attemptsLeft <= 0 || actionRef.current || busy) return
+    if (!session || !canReroll || actionRef.current || busy) return
     actionRef.current = true
     setBusy('reroll')
     setError('')
@@ -2782,7 +2785,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                             <button
                               type="button"
                               onClick={rerollDrop}
-                              disabled={Boolean(busy) || session.attemptsLeft <= 0}
+                              disabled={Boolean(busy) || !canReroll}
                               className="h-9 rounded-lg border border-acid/25 bg-acid/[0.06] px-4 text-[9px] font-black uppercase tracking-[0.08em] text-acid transition hover:bg-acid/[0.12] disabled:opacity-35"
                             >
                               {busy === 'reroll' ? 'Меняем...' : 'Поменять все'}
@@ -2826,8 +2829,12 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                       {upgradePhase === 'confirm'
                         ? 'Проверь шанс и запускай апгрейд'
                         : upgradePhase === 'result'
-                          ? 'Выбери карты для следующего действия'
-                          : 'Клик по карте выбирает её · апгрейд идёт по выбранным'}
+                          ? resultLosses > 0
+                            ? 'Апгрейд не прошёл — все оставшиеся замены сгорели'
+                            : 'Выбери карты для следующего действия'
+                          : hasFailed && session.attemptsLeft <= 0
+                            ? 'Замены сгорели после неудачного апгрейда'
+                            : 'Клик по карте выбирает её · апгрейд идёт по выбранным'}
                     </div>
                   </div>
                 </div>
