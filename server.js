@@ -1719,9 +1719,11 @@ function loadCs2LocalState() {
 }
 
 const REMOTE_TABLE = 'stand_grade_state'
-const CS2_REMOTE_TABLE = 'stand_grade_cs2_state'
+// id = 1 — StandGrade, id = 2 — CS2 Drop. Одна таблица без второго DDL.
+const REMOTE_ROW_STAND = 1
+const REMOTE_ROW_CS2 = 2
 
-async function loadRemoteState(table = REMOTE_TABLE) {
+async function loadRemoteState(table = REMOTE_TABLE, rowId = REMOTE_ROW_STAND) {
   if (!dbPool) return null
   await dbPool.query(`
     CREATE TABLE IF NOT EXISTS ${table} (
@@ -1730,17 +1732,17 @@ async function loadRemoteState(table = REMOTE_TABLE) {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `)
-  const result = await dbPool.query(`SELECT data FROM ${table} WHERE id = 1`)
+  const result = await dbPool.query(`SELECT data FROM ${table} WHERE id = $1`, [rowId])
   return result.rows[0]?.data || null
 }
 
-async function saveRemoteState(table, snapshot) {
+async function saveRemoteState(table, snapshot, rowId = REMOTE_ROW_STAND) {
   if (!dbPool) return
   await dbPool.query(
     `INSERT INTO ${table} (id, data, updated_at)
-     VALUES (1, $1::jsonb, now())
+     VALUES ($1, $2::jsonb, now())
      ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
-    [snapshot],
+    [rowId, snapshot],
   )
 }
 
@@ -1754,7 +1756,7 @@ if (dbPool) {
   standState = remoteStand?.users ? normalizeState(remoteStand) : loadState()
   let remoteCs2 = null
   try {
-    remoteCs2 = await loadRemoteState(CS2_REMOTE_TABLE)
+    remoteCs2 = await loadRemoteState(REMOTE_TABLE, REMOTE_ROW_CS2)
   } catch (error) {
     console.warn(`CS2 state load failed, using defaults: ${error.message}`)
   }
@@ -1766,7 +1768,7 @@ if (dbPool) {
   }
   if (!remoteCs2?.users) {
     try {
-      await saveRemoteState(CS2_REMOTE_TABLE, JSON.stringify(cs2State))
+      await saveRemoteState(REMOTE_TABLE, JSON.stringify(cs2State), REMOTE_ROW_CS2)
     } catch (error) {
       console.warn(`CS2 state save failed: ${error.message}`)
     }
@@ -1798,9 +1800,9 @@ function scheduleRemoteSave(game) {
   saveTimers[game] = setTimeout(() => {
     saveTimers[game] = null
     const snapshot = JSON.stringify(game === 'cs2' ? cs2State : standState)
-    const table = game === 'cs2' ? CS2_REMOTE_TABLE : REMOTE_TABLE
+    const rowId = game === 'cs2' ? REMOTE_ROW_CS2 : REMOTE_ROW_STAND
     saveQueue = saveQueue
-      .then(() => saveRemoteState(table, snapshot))
+      .then(() => saveRemoteState(REMOTE_TABLE, snapshot, rowId))
       .catch((error) => console.error('PostgreSQL save failed:', error.message))
   }, 250)
 }
@@ -1820,8 +1822,8 @@ async function flushState() {
       clearTimeout(saveTimers[game])
       saveTimers[game] = null
       const snapshot = JSON.stringify(game === 'cs2' ? cs2State : standState)
-      const table = game === 'cs2' ? CS2_REMOTE_TABLE : REMOTE_TABLE
-      saveQueue = saveQueue.then(() => saveRemoteState(table, snapshot))
+      const rowId = game === 'cs2' ? REMOTE_ROW_CS2 : REMOTE_ROW_STAND
+      saveQueue = saveQueue.then(() => saveRemoteState(REMOTE_TABLE, snapshot, rowId))
     }
   }
   await saveQueue.catch(() => {})
