@@ -6728,6 +6728,7 @@ function CaseModal({
   )
   const viewportRefs = useRef([])
   const trackRefs = useRef([])
+  const verticalTrackRefs = useRef([])
   const stopSoundRef = useRef(null)
   const duration = fast ? ANIM_MS_FAST : ANIM_MS_NORMAL
   const balance = user.balance
@@ -6787,39 +6788,56 @@ function CaseModal({
     const tracks = []
     const frames = []
 
-    reels.forEach((reel, index) => {
-      const track = trackRefs.current[index]
-      const viewport = viewportRefs.current[index]
-      if (!track || !viewport) return
-      const flaggedIndex = reel.findIndex((item) => item.winner)
-      const target = track.children[flaggedIndex >= 0 ? flaggedIndex : WINNER_INDEX]
-      if (!target) return
+    const verticalGrid = reels.length >= 3
+    if (verticalGrid) {
+      reels.forEach((reel, index) => {
+        const track = verticalTrackRefs.current[index]
+        if (!track) return
+        const item = track.children[0]
+        const itemHeight = item ? item.offsetHeight : 0
+        const startOffset = Math.max(0, (track.children.length - 1) * itemHeight)
+        track.style.transition = 'none'
+        track.style.transform = `translate3d(0,-${startOffset}px,0)`
+        void track.offsetWidth
+        tracks.push({ track, vertical: true })
+      })
+    } else {
+      reels.forEach((reel, index) => {
+        const track = trackRefs.current[index]
+        const viewport = viewportRefs.current[index]
+        if (!track || !viewport) return
+        const flaggedIndex = reel.findIndex((item) => item.winner)
+        const target = track.children[flaggedIndex >= 0 ? flaggedIndex : WINNER_INDEX]
+        if (!target) return
 
-      const startIndex = reel.findIndex((item) => item.isStart)
-      const first = startIndex >= 0 ? track.children[startIndex] : null
-      const startOffset = first
-        ? Math.max(0, first.offsetLeft + first.offsetWidth / 2 - viewport.clientWidth / 2)
-        : 0
+        const startIndex = reel.findIndex((item) => item.isStart)
+        const first = startIndex >= 0 ? track.children[startIndex] : null
+        const startOffset = first
+          ? Math.max(0, first.offsetLeft + first.offsetWidth / 2 - viewport.clientWidth / 2)
+          : 0
 
-      track.style.transition = 'none'
-      track.style.transform = `translate3d(${-startOffset}px,0,0)`
-      void track.offsetWidth
+        track.style.transition = 'none'
+        track.style.transform = `translate3d(${-startOffset}px,0,0)`
+        void track.offsetWidth
 
-      const jitter = (Math.random() * 0.4 - 0.2) * target.offsetWidth
-      const offset = Math.max(
-        0,
-        target.offsetLeft + target.offsetWidth / 2 + jitter - viewport.clientWidth / 2,
-      )
-      tracks.push({ track, offset })
-    })
+        const jitter = (Math.random() * 0.4 - 0.2) * target.offsetWidth
+        const offset = Math.max(
+          0,
+          target.offsetLeft + target.offsetWidth / 2 + jitter - viewport.clientWidth / 2,
+        )
+        tracks.push({ track, offset })
+      })
+    }
 
     const stopSound = startSpinSound(duration, 'case')
     stopSoundRef.current = stopSound
 
     const frame = requestAnimationFrame(() => {
-      tracks.forEach(({ track, offset }) => {
+      tracks.forEach(({ track, offset, vertical }) => {
         track.style.transition = `transform ${duration}ms ${REEL_EASING}`
-        track.style.transform = `translate3d(${-offset}px,0,0)`
+        track.style.transform = vertical
+          ? 'translate3d(0,0,0)'
+          : `translate3d(${-offset}px,0,0)`
       })
     })
     frames.push(frame)
@@ -7262,6 +7280,41 @@ function CaseModal({
                 </div>
               </div>
 
+              {reels.length >= 3 ? (
+                <div className={cx('mx-auto grid w-full gap-2 sm:gap-3', resultGridClass)}>
+                  {reels.map((reel, reelIndex) => {
+                    const winner = reel.find((item) => item.winner) || reel[0]
+                    const fillers = reel.filter((item) => !item.winner).slice(0, 15)
+                    const startItem = reel.find((item) => item.isStart)
+                    const strip = winner
+                      ? [winner, ...fillers, ...(startItem ? [startItem] : [])]
+                      : reel.slice(0, 16)
+                    return (
+                      <div
+                        key={`vertical-${reelIndex}`}
+                        className="case-vertical-cell relative aspect-[7/10] w-full overflow-hidden rounded-[18px] border border-white/[0.08] bg-[#0b120d]"
+                      >
+                        <div
+                          ref={(node) => {
+                            verticalTrackRefs.current[reelIndex] = node
+                          }}
+                          className="case-vertical-track absolute inset-x-0 top-0 flex flex-col"
+                        >
+                          {strip.map((skin, itemIndex) => (
+                            <div
+                              key={skin.reelId || `${reelIndex}-${itemIndex}`}
+                              className="relative aspect-[7/10] w-full shrink-0 overflow-hidden"
+                            >
+                              <SkinVisual skin={skin} className="h-full w-full" showRarity={false} />
+                            </div>
+                          ))}
+                        </div>
+                        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#040905]/35 via-transparent to-[#040905]/25" />
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
               <div className="space-y-1.5">
                 {reels.map((reel, reelIndex) => {
                   if (!compactReels) {
@@ -7401,6 +7454,7 @@ function CaseModal({
                   )
                 })}
               </div>
+              )}
                 </>
               )}
 
@@ -7688,7 +7742,7 @@ function CaseModal({
               )}
             </div>
 
-            {!showResult && (
+            {!showResult && !spinning && (
             <div className="mt-5">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                 <div>
