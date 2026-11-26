@@ -15,6 +15,7 @@
     "start": "node server.js",
     "preview": "vite preview",
     "sync:standoffcraft": "node scripts/sync-standoffcraft.mjs",
+    "sync:cs2": "node scripts/sync-cs2.mjs",
     "db:import": "node scripts/migrate-store-to-postgres.mjs",
     "db:copy": "node scripts/copy-postgres.mjs"
   },

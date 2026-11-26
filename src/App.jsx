@@ -21,6 +21,7 @@ import {
   startSpinSound,
   unlockAudio,
 } from './sound'
+import CS2DropApp, { SiteModeSwitch } from './cs2/CS2DropApp'
 
 /* ------------------------------------------------------------------ */
 /*  Constants & helpers                                                */
@@ -29,6 +30,19 @@ import {
 const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '')
 const TOKEN_KEY = 'stand_grade_token'
 const FAST_KEY = 'stand_grade_fast_anim'
+const SITE_MODE_KEY = 'stand_grade_site_mode'
+const SITE_TITLES = {
+  stand: 'STAND GRADE — кейсы Standoff 2',
+  cs2: 'CS2 DROP — Counter-Strike 2 case arena',
+}
+
+function readSiteMode() {
+  try {
+    return localStorage.getItem(SITE_MODE_KEY) === 'cs2' ? 'cs2' : 'stand'
+  } catch {
+    return 'stand'
+  }
+}
 
 const RARITY_ORDER = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary', 'Arcane', 'Nameless']
 
@@ -1077,6 +1091,7 @@ function Header({
   promoBadge = 0,
   requestBadge = 0,
   activeSection = 'cases',
+  onSwitchMode,
   onNavigate,
   onStore,
   onDonate,
@@ -1100,21 +1115,26 @@ function Header({
   return (
     <header className="sticky top-0 z-40 border-b border-white/[0.06] bg-[#070b08]/86 backdrop-blur-xl">
       <div className="mx-auto flex h-[66px] max-w-[1540px] items-center justify-between gap-2 px-3 sm:px-6 xl:px-8">
-        <button
-          type="button"
-          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-          className="shrink-0 text-left"
-          aria-label="STAND GRADE — наверх"
-        >
-          <div className="hidden sm:block">
-            <Logo />
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+            className="shrink-0 text-left"
+            aria-label="STAND GRADE — наверх"
+          >
+            <div className="hidden sm:block">
+              <Logo />
+            </div>
+            <div className="sm:hidden">
+              <Logo compact />
+            </div>
+          </button>
+          <div className="hidden xl:block">
+            <SiteModeSwitch mode="stand" onSwitch={onSwitchMode} />
           </div>
-          <div className="sm:hidden">
-            <Logo compact />
-          </div>
-        </button>
+        </div>
 
-        <nav className="hidden items-center gap-1 lg:flex" aria-label="Основная навигация">
+        <nav className="hidden items-center gap-1 xl:flex" aria-label="Основная навигация">
           {NAV_ITEMS.map((item) => (
             <button
               key={item.id}
@@ -1302,6 +1322,17 @@ function Header({
                   type="button"
                   onClick={() => {
                     setMenuOpen(false)
+                    onSwitchMode?.('cs2')
+                  }}
+                  className="mt-1 flex w-full items-center gap-2 rounded-lg border border-[#f0a92e]/15 bg-[#f0a92e]/[0.06] px-3 py-2.5 text-left text-[12px] font-bold text-[#ffd08a] transition hover:border-[#f0a92e]/35 hover:bg-[#f0a92e]/[0.1]"
+                >
+                  <Icon name="bolt" size={14} />
+                  CS2 Drop · скины CS2
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
                     onNavigate('glyphs')
                   }}
                   className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] font-bold text-white/60 transition hover:bg-white/[0.05] hover:text-white"
@@ -1376,7 +1407,7 @@ function MobileDock({
   activeSection = 'cases',
 }) {
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-white/[0.07] bg-[#080d09]/95 backdrop-blur-xl lg:hidden">
+    <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-white/[0.07] bg-[#080d09]/95 backdrop-blur-xl xl:hidden">
       <div className="safe-bottom grid grid-cols-8 px-1 pb-1 pt-1.5">
         {[
           { id: 'cases', label: 'Кейсы', icon: 'box' },
@@ -9901,6 +9932,7 @@ export default function App() {
   const [storeOpen, setStoreOpen] = useState(false)
   const [donateOpen, setDonateOpen] = useState(false)
   const [activeSection, setActiveSection] = useState(readSectionFromHash)
+  const [siteMode, setSiteMode] = useState(readSiteMode)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [withdrawSkin, setWithdrawSkin] = useState(null)
   const [online, setOnline] = useState(1)
@@ -9915,6 +9947,15 @@ export default function App() {
   const toastIdRef = useRef(0)
   const lastUnseenRef = useRef(0)
   const now = useNow()
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SITE_MODE_KEY, siteMode)
+    } catch {
+      /* localStorage may be unavailable */
+    }
+    document.title = SITE_TITLES[siteMode] || SITE_TITLES.stand
+  }, [siteMode])
 
   // Разблокируем Web Audio на первом же жесте пользователя.
   // Иначе первый звук после async-запроса может остаться в suspended-контексте.
@@ -10234,6 +10275,18 @@ export default function App() {
   const requestBadge =
     user.role === 'owner' ? Number(status.applications?.pendingCount) || 0 : 0
 
+  if (siteMode === 'cs2') {
+    return (
+      <CS2DropApp
+        username={user.username}
+        onSwitchMode={(mode) => {
+          if (mode === 'stand') setSiteMode('stand')
+        }}
+        onLogout={handleLogout}
+      />
+    )
+  }
+
   return (
     <div key={user.id} className="relative min-h-screen overflow-x-hidden">
       {status.event?.active && <WinterSnow />}
@@ -10256,6 +10309,7 @@ export default function App() {
         promoBadge={unseenPromos}
         requestBadge={requestBadge}
         activeSection={activeSection}
+        onSwitchMode={setSiteMode}
         onNavigate={navigate}
         onStore={goStore}
         onDonate={() => setDonateOpen(true)}
@@ -10266,7 +10320,7 @@ export default function App() {
       />
       {status.event?.active && <WinterEventBar event={status.event} onNavigate={navigate} />}
 
-      <main className="relative mx-auto max-w-[1540px] px-3 pb-28 sm:px-6 lg:pb-10 xl:px-8">
+      <main className="relative mx-auto max-w-[1540px] px-3 pb-28 sm:px-6 xl:pb-10 xl:px-8">
         <div key={activeSection} className="fade-up">
           {activeSection === 'upgrade' && (
             <UpgradeSection
