@@ -7449,8 +7449,22 @@ function CaseModal({
               )}
 
               {showResult && results?.length > 0 && (
-                <div className="relative">
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div className="pop-in relative">
+                  <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl">
+                    <div className="absolute left-1/2 top-1/2 h-[560px] w-[560px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(53,255,135,.14),transparent_66%)] blur-2xl" />
+                    <div className="absolute left-1/2 top-1/2 h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full border border-acid/10 bg-[radial-gradient(circle,rgba(53,255,135,.05),transparent_62%)] shadow-[inset_0_0_120px_rgba(0,0,0,.9)]" />
+                    <div className="absolute inset-x-0 top-0 flex justify-center gap-2 opacity-[0.16] blur-[7px]">
+                      {(reels[0] || []).slice(0, 12).map((skin) => (
+                        <div
+                          key={skin.reelId}
+                          className="h-24 w-20 shrink-0 overflow-hidden rounded-lg border border-white/10"
+                        >
+                          <SkinVisual skin={skin} className="h-full w-full" showRarity={false} />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="relative mb-3 flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <span className="text-[8px] font-black uppercase tracking-[0.15em] text-acid">
                         Вам выпало
@@ -7479,7 +7493,13 @@ function CaseModal({
                     </div>
                   </div>
 
-                  <div className={cx('mx-auto grid gap-2 sm:gap-3', resultGridClass)}>
+                  <div
+                    className={cx(
+                      'relative flex justify-center',
+                      results.length <= 3 ? 'min-h-[42vh] items-center' : 'items-start',
+                    )}
+                  >
+                    <div className={cx('grid w-full gap-2 sm:gap-3', resultGridClass)}>
                     {results.map((item, index) => {
                       const meta = RARITY[item.rarity] || RARITY.Common
                       const isSold = soldSet.has(item.instanceId)
@@ -7510,10 +7530,15 @@ function CaseModal({
                           </div>
                           <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#040905]/90 via-[#040905]/5 to-[#040905]/50" />
                           <div className="relative flex h-full flex-col p-2 sm:p-2.5">
-                            <div className="flex justify-center">
+                            <div className="flex justify-center gap-1">
                               <span className="rounded-md border border-white/[0.12] bg-black/45 px-2 py-0.5 text-[10px] font-black tabular-nums text-white/85 backdrop-blur-sm">
                                 {formatPrice(item.price)}
                               </span>
+                              {item.isStatTrak && (
+                                <span className="rounded-md border border-[#ffcf4d]/40 bg-[#ffcf4d]/15 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-[0.04em] text-[#ffe6a3]">
+                                  ST
+                                </span>
+                              )}
                             </div>
                             <div className="mt-auto text-center">
                               <div className="text-[7px] font-black uppercase tracking-[0.18em] text-white/45">
@@ -7559,6 +7584,7 @@ function CaseModal({
                         </button>
                       )
                     })}
+                  </div>
                   </div>
 
                   <div className="sticky bottom-0 z-20 -mx-3 -mb-3 mt-3 flex flex-wrap items-center gap-2 border-t border-white/[0.07] bg-[#060a07]/95 px-3 py-3 backdrop-blur sm:-mx-4 sm:-mb-4 sm:px-4">
@@ -7662,6 +7688,7 @@ function CaseModal({
               )}
             </div>
 
+            {!showResult && (
             <div className="mt-5">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                 <div>
@@ -7669,8 +7696,7 @@ function CaseModal({
                   <h3 className="mt-1 font-display text-[16px] font-extrabold tracking-[-0.03em] text-white">
                     Содержимое кейса
                   </h3>
-                </div>
-                <div className="no-scrollbar flex gap-1.5 overflow-x-auto">
+                </div>                <div className="no-scrollbar flex gap-1.5 overflow-x-auto">
                   {caseData.rarityBreakdown.map((row) => (
                     <span
                       key={row.rarity}
@@ -7732,6 +7758,7 @@ function CaseModal({
                 })}
               </div>
             </div>
+            )}
           </div>
         </div>
       </div>
