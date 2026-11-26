@@ -647,6 +647,28 @@ select:focus-visible {
   animation: glyph-confetti-fall 1400ms cubic-bezier(0.18, 0.7, 0.3, 1) both;
 }
 
+@keyframes glyph-card-skip {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotate(0deg);
+    filter: blur(0);
+  }
+  18% {
+    opacity: 1;
+    transform: translateY(-10px) scale(1.03) rotate(-1.5deg);
+    filter: blur(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-110px) scale(0.78) rotate(-9deg);
+    filter: blur(14px);
+  }
+}
+
+.glyph-card-skip {
+  animation: glyph-card-skip 480ms cubic-bezier(0.4, 0, 0.7, 0.2) both !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

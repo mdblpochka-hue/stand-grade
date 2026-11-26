@@ -15,6 +15,7 @@ import {
   playCaseResult,
   playCoin,
   playGlyphResult,
+  playGlyphSkip,
   playUpgradeResult,
   setSoundEnabled,
   startSpinSound,
@@ -2017,6 +2018,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   const [openCount, setOpenCount] = useState(1)
   const [selectedDropIds, setSelectedDropIds] = useState([])
   const [busy, setBusy] = useState('')
+  const [skipping, setSkipping] = useState(false)
   const [error, setError] = useState('')
   const [upgradeMultiplier, setUpgradeMultiplier] = useState(2)
   const [upgradePhase, setUpgradePhase] = useState(null)
@@ -2134,7 +2136,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   }
 
   function closeModal() {
-    if (upgradePhase === 'spinning') return
+    if (upgradePhase === 'spinning' || skipping) return
     setModalOpen(false)
     setDeckPreview(false)
     setReopening(false)
@@ -2151,7 +2153,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
     setModalOpen(true)
     setDeckPreview(true)
     setReopening(true)
-    setOpenCount(1)
+    setSelectedDropIds([])
     resetUpgrade()
   }
 
@@ -2305,6 +2307,31 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
       if (requestError.data?.user) onUpdate(requestError.data)
     } finally {
       setBusy('')
+      actionRef.current = false
+    }
+  }
+
+  async function skipDrop() {
+    if (!session || actionRef.current || busy || skipping || upgradePhase === 'spinning') {
+      return
+    }
+    actionRef.current = true
+    setSkipping(true)
+    setError('')
+    unlockAudio()
+    playGlyphSkip()
+    try {
+      const animation = new Promise((resolve) => setTimeout(resolve, 700))
+      const data = await apiRequest('/api/glyph/skip', { method: 'POST', token })
+      await animation
+      onUpdate(data)
+      finishBatch()
+    } catch (requestError) {
+      setError(requestError.message)
+      onToast(requestError.message, 'error')
+      if (requestError.data?.user) onUpdate(requestError.data)
+    } finally {
+      setSkipping(false)
       actionRef.current = false
     }
   }
@@ -2546,7 +2573,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                 <button
                   type="button"
                   onClick={closeModal}
-                  disabled={upgradePhase === 'spinning'}
+                  disabled={upgradePhase === 'spinning' || skipping}
                   className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.09] text-white/45 transition hover:border-white/20 hover:text-white disabled:opacity-30"
                   aria-label="Закрыть"
                 >
@@ -2712,15 +2739,21 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                           <button
                             key={`${dropItem.id}-${dropItem.rollId || 'x'}`}
                             type="button"
-                            style={{ animationDelay: `${index * 45}ms` }}
+                            style={{
+                              animationDelay: skipping
+                                ? `${index * 18}ms`
+                                : `${index * 45}ms`,
+                            }}
                             onClick={() => toggleDrop(dropItem.id)}
                             disabled={
+                              skipping ||
                               dropItem.failed ||
                               upgradePhase === 'confirm' ||
                               upgradePhase === 'spinning'
                             }
                             className={cx(
-                              'glyph-card-reveal group relative aspect-[7/10] w-full overflow-hidden rounded-[18px] border text-left transition duration-200 disabled:cursor-default',
+                              'group relative aspect-[7/10] w-full overflow-hidden rounded-[18px] border text-left transition duration-200 disabled:cursor-default',
+                              skipping ? 'glyph-card-skip' : 'glyph-card-reveal',
                               selected && !dropItem.failed
                                 ? 'border-acid/65 shadow-[0_0_34px_rgba(53,255,135,.18)]'
                                 : 'border-white/[0.1]',
@@ -2843,7 +2876,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                             key={multiplier}
                             type="button"
                             onClick={() => chooseMultiplier(multiplier)}
-                            disabled={upgradePhase === 'spinning'}
+                            disabled={upgradePhase === 'spinning' || skipping}
                             className={cx(
                               'h-9 w-11 rounded-lg border text-[10px] font-black tabular-nums transition disabled:opacity-40',
                               upgradeMultiplier === multiplier
@@ -2862,7 +2895,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                             <button
                               type="button"
                               onClick={cancelUpgrade}
-                              disabled={upgradePhase === 'spinning'}
+                              disabled={upgradePhase === 'spinning' || skipping}
                               className="h-9 rounded-lg border border-white/[0.12] bg-white/[0.04] px-4 text-[9px] font-black uppercase tracking-[0.08em] text-white/70 transition hover:bg-white/[0.08] disabled:opacity-40"
                             >
                               Отмена
@@ -2870,7 +2903,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                             <button
                               type="button"
                               onClick={runUpgrade}
-                              disabled={upgradePhase === 'spinning'}
+                              disabled={upgradePhase === 'spinning' || skipping}
                               className="h-9 rounded-lg border border-acid/60 bg-acid px-7 text-[9px] font-black uppercase tracking-[0.1em] text-[#041007] shadow-[0_0_24px_rgba(53,255,135,.28)] transition hover:bg-[#5cffa0] disabled:opacity-50"
                             >
                               Апгрейд
@@ -2881,7 +2914,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                             <button
                               type="button"
                               onClick={collectDrop}
-                              disabled={Boolean(busy) || (!selectedDrops.length && !hasFailed)}
+                              disabled={Boolean(busy) || skipping || (!selectedDrops.length && !hasFailed)}
                               className={cx(
                                 'h-9 rounded-lg border px-4 text-[9px] font-black uppercase tracking-[0.08em] transition disabled:opacity-35',
                                 !selectableDrops.length && hasFailed
@@ -2894,7 +2927,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                             <button
                               type="button"
                               onClick={rerollDrop}
-                              disabled={Boolean(busy) || !canReroll}
+                              disabled={Boolean(busy) || skipping || !canReroll}
                               className="h-9 rounded-lg border border-acid/25 bg-acid/[0.06] px-4 text-[9px] font-black uppercase tracking-[0.08em] text-acid transition hover:bg-acid/[0.12] disabled:opacity-35"
                             >
                               {busy === 'reroll' ? 'Меняем...' : 'Поменять все'}
@@ -2902,7 +2935,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                             <button
                               type="button"
                               onClick={enterUpgradeConfirm}
-                              disabled={Boolean(busy) || !selectedDrops.length}
+                              disabled={Boolean(busy) || skipping || !selectedDrops.length}
                               className="h-9 rounded-lg border border-acid/60 bg-acid px-6 text-[9px] font-black uppercase tracking-[0.1em] text-[#041007] shadow-[0_0_24px_rgba(53,255,135,.28)] transition hover:bg-[#5cffa0] disabled:opacity-40"
                             >
                               Апгрейд
@@ -2911,7 +2944,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                               <button
                                 type="button"
                                 onClick={sellDrop}
-                                disabled={Boolean(busy)}
+                                disabled={Boolean(busy) || skipping}
                                 className="h-9 rounded-lg border border-[#ffcf4d]/25 bg-[#ffcf4d]/[0.06] px-4 text-[9px] font-black uppercase tracking-[0.08em] text-[#ffe6a3] transition hover:bg-[#ffcf4d]/[0.12] disabled:opacity-35"
                               >
                                 Продать {formatPrice(selectedValue)}
@@ -2921,14 +2954,34 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                         )}
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={toggleSelectAll}
-                        disabled={upgradePhase === 'confirm' || upgradePhase === 'spinning'}
-                        className="hidden h-9 shrink-0 rounded-lg border border-white/[0.1] bg-white/[0.03] px-3 text-[8px] font-black uppercase tracking-[0.06em] text-white/45 transition hover:border-white/25 hover:text-white disabled:opacity-30 sm:block"
-                      >
-                        {allSelected ? 'Снять выбор' : 'Выбрать все'}
-                      </button>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={toggleSelectAll}
+                          disabled={
+                            skipping ||
+                            upgradePhase === 'confirm' ||
+                            upgradePhase === 'spinning'
+                          }
+                          className="hidden h-9 rounded-lg border border-white/[0.1] bg-white/[0.03] px-3 text-[8px] font-black uppercase tracking-[0.06em] text-white/45 transition hover:border-white/25 hover:text-white disabled:opacity-30 sm:block"
+                        >
+                          {allSelected ? 'Снять выбор' : 'Выбрать все'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={skipDrop}
+                          disabled={
+                            Boolean(busy) ||
+                            skipping ||
+                            upgradePhase === 'confirm' ||
+                            upgradePhase === 'spinning'
+                          }
+                          title="Скипнуть текущий дроп без возврата"
+                          className="h-9 rounded-lg border border-[#ff7189]/20 bg-[#ff7189]/[0.05] px-3 text-[8px] font-black uppercase tracking-[0.06em] text-[#ff9aac]/80 transition hover:bg-[#ff7189]/[0.12] disabled:opacity-30"
+                        >
+                          {skipping ? '...' : 'Скип'}
+                        </button>
+                      </div>
                     </div>
 
                     {upgradeError && (

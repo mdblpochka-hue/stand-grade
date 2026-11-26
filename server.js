@@ -521,15 +521,15 @@ function makeRatioPool(casePrice) {
  * собраны в отдельные полосы (1–3x и тяжёлый хвост 3x+). RTP каждого
  * глифа подгоняется бинарным поиском до GLYPH_TARGET_RTP.
  */
-const GLYPH_LOSS_CENTER = 0.55
-const GLYPH_LOSS_SIGMA = 0.4
+const GLYPH_LOSS_CENTER = 0.58
+const GLYPH_LOSS_SIGMA = 0.38
 const GLYPH_MID_CENTER = 1.5
 const GLYPH_MID_SIGMA = 0.42
-const GLYPH_TAIL_DECAY = 1.4
-const GLYPH_MID_AMP = 0.15
-const GLYPH_TAIL_AMP = 0.06
-const GLYPH_TARGET_RTP = 0.88
-const GLYPH_MIN_RATIO = 1 / 14
+const GLYPH_TAIL_DECAY = 1.1
+const GLYPH_MID_AMP = 0.04
+const GLYPH_TAIL_AMP = 0.02
+const GLYPH_TARGET_RTP = 0.82
+const GLYPH_MIN_RATIO = 1 / 20
 
 function makeGlyphPool(price) {
   const loss = []
@@ -565,7 +565,7 @@ function makeGlyphPool(price) {
 
   const lossAvg = lossMass / (loss.length || 1)
   const entries = []
-  for (const [skin, bell] of loss) entries.push([skin, bell + lossAvg * 0.02, false])
+  for (const [skin, bell] of loss) entries.push([skin, bell + lossAvg * 0.015, false])
   const midScale = midMass > 0 ? (GLYPH_MID_AMP * lossMass) / midMass : 0
   for (const [skin, bell] of mid) entries.push([skin, bell * midScale, true])
   const tailScale = tailShape > 0 ? (GLYPH_TAIL_AMP * lossMass) / tailShape : 0
@@ -2871,6 +2871,22 @@ app.post('/api/glyph/reroll', auth, (req, res) => {
     user: publicUser(user),
     daily: buildDaily(),
     message: `Перекручено карт: ${rollCount}`,
+  })
+})
+
+app.post('/api/glyph/skip', auth, (req, res) => {
+  const user = req.user
+  const session = user.glyphDrop
+  if (!session?.drops?.length) return sendError(res, 409, 'NO_GLYPH_DROP', 'Сначала открой глиф')
+  const skipped = session.drops.length
+  user.glyphDrop = null
+  saveState()
+  return res.json({
+    ok: true,
+    glyphDrop: null,
+    user: publicUser(user),
+    daily: buildDaily(),
+    message: `Скип: ${skipped} ${skipped === 1 ? 'карта' : skipped < 5 ? 'карты' : 'карт'} сброшено`,
   })
 })
 

@@ -143,6 +143,13 @@ export function playUpgradeResult(won) {
   }
 }
 
+export function playGlyphSkip() {
+  if (!enabled) return
+  tone({ freq: 760, slideTo: 150, duration: 0.3, type: 'sawtooth', gain: 0.025 })
+  tone({ freq: 320, slideTo: 90, duration: 0.24, type: 'triangle', gain: 0.03, delay: 0.05 })
+  tone({ freq: 1180, duration: 0.08, type: 'square', gain: 0.012, delay: 0.22 })
+}
+
 /**
  * Результат открытия глифов:
  * jackpot — дроп 2x+ (фанфары + искры), profit — окуп меньше 2x, loss — обычный проигрыш.
