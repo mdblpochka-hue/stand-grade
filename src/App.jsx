@@ -1384,6 +1384,18 @@ function Header({
             </div>
           </div>
 
+          {Number(user.guaranteedUpgrades) > 0 && (
+            <div
+              title="Гарантированные апгрейды"
+              className="flex h-10 items-center gap-1.5 rounded-xl border border-[#c08bff]/30 bg-[#c08bff]/[0.1] px-2 text-[#e2c7ff] sm:px-2.5"
+            >
+              <Icon name="bolt" size={13} />
+              <span className="text-[11px] font-extrabold tabular-nums">
+                {Math.trunc(Number(user.guaranteedUpgrades))}
+              </span>
+            </div>
+          )}
+
           <button
             type="button"
             onClick={onDonate}
@@ -2231,6 +2243,10 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
   const hasFailed = drops.some((drop) => drop.failed)
   const canReroll = Boolean(session && session.attemptsLeft > 0 && selectableDrops.length > 0)
   const resultLosses = upgradeResults.filter((result) => !result.won).length
+  const guaranteedCharges = Math.max(
+    0,
+    Math.trunc(Number(user.guaranteedUpgrades) || 0),
+  )
   const selectedValue = selectedDrops.reduce(
     (sum, drop) => sum + drop.currentDrop.price,
     0,
@@ -3062,10 +3078,15 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                   </div>
 
                   <div className="relative shrink-0 border-t border-white/[0.08] bg-[#080f0a]/95 px-3 py-2.5 backdrop-blur sm:px-5 sm:py-3">
-                    <div className="mb-2 flex items-center justify-center gap-2">
+                    <div className="mb-2 flex flex-wrap items-center justify-center gap-2">
                       <span className="text-[8px] font-black uppercase tracking-[0.14em] text-white/35">
                         Перекруты {session.attemptsLeft}/{session.attemptsTotal || 5}
                       </span>
+                      {guaranteedCharges > 0 && (
+                        <span className="rounded-full border border-[#c08bff]/30 bg-[#c08bff]/[0.1] px-2 py-0.5 text-[7px] font-black uppercase tracking-[0.1em] text-[#e2c7ff]">
+                          ⚡ гарант ×{guaranteedCharges}
+                        </span>
+                      )}
                       <span className="flex items-center gap-0.5 text-[13px] leading-none">
                         {Array.from({ length: session.attemptsTotal || 5 }).map((_, index) => (
                           <span
@@ -4609,6 +4630,7 @@ function PromoSection({ promos, user, token, event, onUpdate, onToast, onNavigat
   const [promoType, setPromoType] = useState('gold')
   const [amount, setAmount] = useState('250')
   const [percent, setPercent] = useState('10')
+  const [guaranteedUpgrades, setGuaranteedUpgrades] = useState('5')
   const [maxUses, setMaxUses] = useState('100')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
@@ -4656,6 +4678,7 @@ function PromoSection({ promos, user, token, event, onUpdate, onToast, onNavigat
           type: promoType,
           amount: Number(amount) || 0,
           percent: Number(percent) || 0,
+          upgrades: Number(guaranteedUpgrades) || 0,
           maxUses: Number(maxUses) || 0,
         },
       })
@@ -4715,7 +4738,7 @@ function PromoSection({ promos, user, token, event, onUpdate, onToast, onNavigat
             <div>
               <div className="text-[10px] font-black uppercase tracking-[0.14em] text-white/70">Активация</div>
               <div className="text-[8px] font-semibold text-white/30">
-                Один промокод — один раз на аккаунт · валюта или % к пополнению
+                Один код — один раз на аккаунт · валюта, % к пополнению или гарант-апгрейды
               </div>
             </div>
           </div>
@@ -4797,10 +4820,11 @@ function PromoSection({ promos, user, token, event, onUpdate, onToast, onNavigat
 
           {promos?.canCreate && (
             <form onSubmit={createPromo} className="relative mt-3 space-y-2">
-              <div className="grid grid-cols-2 gap-2 rounded-xl border border-white/[0.06] bg-black/20 p-1">
+              <div className="grid grid-cols-3 gap-2 rounded-xl border border-white/[0.06] bg-black/20 p-1">
                 {[
                   ['gold', 'Голда'],
                   ['deposit_percent', '% к пополнению'],
+                  ['guaranteed_upgrades', 'Гарант-апгрейды'],
                 ].map(([value, label]) => (
                   <button
                     key={value}
@@ -4831,17 +4855,22 @@ function PromoSection({ promos, user, token, event, onUpdate, onToast, onNavigat
                 </label>
                 <label className="block">
                   <span className="mb-1 block text-[7px] font-black uppercase tracking-[0.12em] text-white/28">
-                    {promoType === 'deposit_percent' ? 'Процент, %' : `Награда, ${gameUnit()}`}
+                    {promoType === 'deposit_percent'
+                      ? 'Процент, %'
+                      : promoType === 'guaranteed_upgrades'
+                        ? 'Апгрейдов'
+                        : `Награда, ${gameUnit()}`}
                   </span>
                   <input
-                    value={promoType === 'deposit_percent' ? percent : amount}
+                    value={promoType === 'deposit_percent' ? percent : promoType === 'guaranteed_upgrades' ? guaranteedUpgrades : amount}
                     onChange={(event_) => {
                       const value = event_.target.value.replace(/[^0-9]/g, '').slice(0, promoType === 'deposit_percent' ? 3 : 7)
                       if (promoType === 'deposit_percent') setPercent(value)
+                      else if (promoType === 'guaranteed_upgrades') setGuaranteedUpgrades(value)
                       else setAmount(value)
                     }}
                     inputMode="numeric"
-                    placeholder={promoType === 'deposit_percent' ? '10' : '250'}
+                    placeholder={promoType === 'deposit_percent' ? '10' : promoType === 'guaranteed_upgrades' ? '5' : '250'}
                     className="h-9 w-full rounded-lg border border-white/[0.09] bg-black/30 px-2.5 text-[10px] font-bold tabular-nums text-white placeholder:text-white/20 focus:border-[#ffcf4d]/40 focus:outline-none"
                   />
                 </label>
@@ -4907,6 +4936,10 @@ function PromoSection({ promos, user, token, event, onUpdate, onToast, onNavigat
                 {promo.type === 'deposit_percent' ? (
                   <span className="rounded-md border border-[#9fdcff]/25 bg-[#9fdcff]/[0.07] px-2 py-1 text-[9px] font-extrabold tabular-nums text-[#cbefff]">
                     +{promo.percent}% к пополнению
+                  </span>
+                ) : promo.type === 'guaranteed_upgrades' ? (
+                  <span className="rounded-md border border-[#c08bff]/25 bg-[#c08bff]/[0.07] px-2 py-1 text-[9px] font-extrabold tabular-nums text-[#e2c7ff]">
+                    +{promo.upgrades} гарант. апгрейдов
                   </span>
                 ) : (
                   <span className="rounded-md border border-acid/20 bg-acid/[0.06] px-2 py-1 text-[9px] font-extrabold tabular-nums text-acid">
@@ -5011,12 +5044,19 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
       ? Math.max(0, Math.round((target.price * UPGRADE_EDGE - baseTotal) * 100) / 100)
       : 0
   const boostCap = Math.min(maxBoost, Math.max(0, user.balance))
+  const guaranteedCharges = Math.max(
+    0,
+    Math.trunc(Number(user.guaranteedUpgrades) || 0),
+  )
+  const guaranteedActive = guaranteedCharges > 0
   const chance =
     baseItems.length && target
-      ? Math.min(
-          90,
-          Math.max(1, Math.round(((baseTotal + boost) / target.price) * 90 * 100) / 100),
-        )
+      ? guaranteedActive
+        ? 100
+        : Math.min(
+            90,
+            Math.max(1, Math.round(((baseTotal + boost) / target.price) * 90 * 100) / 100),
+          )
       : 0
   const naturalChance =
     baseItems.length && target
@@ -5239,6 +5279,11 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
               <span className="rounded-full border border-lime/20 bg-lime/[0.07] px-2 py-0.5 text-[7px] font-black uppercase tracking-[0.14em] text-lime">
                 дом-эдж 10%
               </span>
+              {guaranteedCharges > 0 && (
+                <span className="rounded-full border border-[#c08bff]/30 bg-[#c08bff]/[0.1] px-2 py-0.5 text-[7px] font-black uppercase tracking-[0.12em] text-[#e2c7ff]">
+                  ⚡ Гарант ×{guaranteedCharges}
+                </span>
+              )}
             </div>
             <h2 className="mt-2.5 font-display text-[30px] font-black leading-[0.95] tracking-[-0.055em] text-white sm:text-[46px]">
               АПГРЕЙД <span className="text-gradient">СКИНОВ</span>

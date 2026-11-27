@@ -92,6 +92,8 @@ const COMPENSATION_MAX = 0.1
 const UPGRADE_MAX_ITEMS = 7
 const PROMO_MAX_AMOUNT = 1000000
 const PROMO_MAX_USES = 100000
+const PROMO_MAX_GUARANTEED_UPGRADES = 100
+const GUARANTEED_UPGRADE_CAP = 1000
 const PROMO_MAX_PERCENT = 100
 const DAILY_LIMIT = 15000
 const MAX_DEPOSIT = 10000000
@@ -1411,21 +1413,26 @@ function makeSeedUser(username, password, role, balance) {
     promoSeenAt: null,
     depositBoost: null,
     glyphDrop: null,
+    guaranteedUpgrades: 0,
     createdAt: new Date().toISOString(),
   }
 }
 
 function makePromo(
   code,
-  { amount = 0, percent = 0, maxUses, createdBy = 'system', type = 'gold' } = {},
+  { amount = 0, percent = 0, upgrades = 0, maxUses, createdBy = 'system', type = 'gold' } = {},
 ) {
-  const promoType = type === 'deposit_percent' ? 'deposit_percent' : 'gold'
+  const promoType = ['deposit_percent', 'guaranteed_upgrades'].includes(type) ? type : 'gold'
   return {
     id: crypto.randomUUID(),
     code,
     type: promoType,
     amount: promoType === 'gold' ? roundGold(amount) : 0,
     percent: promoType === 'deposit_percent' ? Math.max(1, Math.min(100, Math.trunc(percent))) : 0,
+    upgrades:
+      promoType === 'guaranteed_upgrades'
+        ? Math.max(1, Math.min(PROMO_MAX_GUARANTEED_UPGRADES, Math.trunc(upgrades)))
+        : 0,
     maxUses: Math.max(1, Math.trunc(maxUses)),
     usedBy: [],
     createdBy,
@@ -1483,6 +1490,7 @@ function makeCs2UserFrom(baseUser) {
     promoSeenAt: null,
     depositBoost: null,
     glyphDrop: null,
+    guaranteedUpgrades: 0,
     createdAt: baseUser.createdAt || new Date().toISOString(),
   }
 }
@@ -1665,6 +1673,10 @@ function migrateUser(user, skinById = SKIN_BY_ID) {
   if (!Array.isArray(user.activatedPromos)) user.activatedPromos = []
   if (!user.promoSeenAt) user.promoSeenAt = null
   if (!user.depositBoost || typeof user.depositBoost !== 'object') user.depositBoost = null
+  user.guaranteedUpgrades = Math.max(
+    0,
+    Math.min(GUARANTEED_UPGRADE_CAP, Math.trunc(Number(user.guaranteedUpgrades) || 0)),
+  )
   user.history.cases = user.history.cases.map((entry) => {
     if (!entry?.skin?.id) return entry
     if (skinById.has(entry.skin.id)) return { ...entry, skin: skinById.get(entry.skin.id) }
@@ -2176,8 +2188,9 @@ function publicPromos(user) {
         id: promo.id,
         code: promo.code,
         type: promo.type || 'gold',
-        amount: promo.type === 'deposit_percent' ? 0 : promo.amount,
+        amount: promo.type === 'gold' ? promo.amount : 0,
         percent: promo.type === 'deposit_percent' ? promo.percent : 0,
+        upgrades: promo.type === 'guaranteed_upgrades' ? promo.upgrades : 0,
         maxUses: promo.maxUses,
         usedCount,
         remaining,
@@ -2262,9 +2275,15 @@ function pushApplication(application) {
 }
 
 function parsePromoRequest(body = {}) {
-  const type = body?.type === 'deposit_percent' ? 'deposit_percent' : 'gold'
+  const type =
+    body?.type === 'deposit_percent'
+      ? 'deposit_percent'
+      : body?.type === 'guaranteed_upgrades'
+        ? 'guaranteed_upgrades'
+        : 'gold'
   let amount = 0
   let percent = 0
+  let upgrades = 0
 
   if (type === 'gold') {
     amount = Math.floor(Number(body?.amount))
@@ -2275,13 +2294,22 @@ function parsePromoRequest(body = {}) {
         message: `Награда должна быть от 1 до ${formatGold(PROMO_MAX_AMOUNT)}`,
       }
     }
-  } else {
+  } else if (type === 'deposit_percent') {
     percent = Math.trunc(Number(body?.percent))
     if (!Number.isFinite(percent) || percent < 1 || percent > PROMO_MAX_PERCENT) {
       return {
         ok: false,
         code: 'BAD_PERCENT',
         message: `Процент должен быть от 1 до ${PROMO_MAX_PERCENT}`,
+      }
+    }
+  } else {
+    upgrades = Math.trunc(Number(body?.upgrades))
+    if (!Number.isFinite(upgrades) || upgrades < 1 || upgrades > PROMO_MAX_GUARANTEED_UPGRADES) {
+      return {
+        ok: false,
+        code: 'BAD_UPGRADES',
+        message: `Гарантированных апгрейдов: от 1 до ${PROMO_MAX_GUARANTEED_UPGRADES}`,
       }
     }
   }
@@ -2301,13 +2329,18 @@ function parsePromoRequest(body = {}) {
     .replace(/[^A-Z0-9_-]/g, '')
     .slice(0, 24)
 
-  return { ok: true, type, amount, percent, maxUses, code }
+  return { ok: true, type, amount, percent, upgrades, maxUses, code }
 }
 
 function createPromoFromRequest(input = {}, createdBy) {
   let code = input.code
   if (!code) {
-    const prefix = input.type === 'deposit_percent' ? 'BOOST' : 'WINTER'
+    const prefix =
+      input.type === 'deposit_percent'
+        ? 'BOOST'
+        : input.type === 'guaranteed_upgrades'
+          ? 'CHEAT'
+          : 'WINTER'
     code = `${prefix}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`
   }
   if (state.promos.some((promo) => promo.code === code)) {
@@ -2318,6 +2351,7 @@ function createPromoFromRequest(input = {}, createdBy) {
     type: input.type,
     amount: input.amount,
     percent: input.percent,
+    upgrades: input.upgrades,
     maxUses: input.maxUses,
     createdBy,
   })
@@ -2571,6 +2605,10 @@ function publicUser(user) {
     unlimitedFreeCase: isAdmin,
     dailyLimit: daily,
     depositBoost: user.depositBoost || null,
+    guaranteedUpgrades: Math.max(
+      0,
+      Math.trunc(Number(user.guaranteedUpgrades) || 0),
+    ),
     glyphDrop: publicGlyphDrop(user),
     createdAt: user.createdAt,
     serverTime: new Date().toISOString(),
@@ -3537,18 +3575,27 @@ app.post('/api/glyph/upgrade', auth, (req, res) => {
   const results = []
   let wins = 0
   let losses = 0
+  let guaranteedLeft = Math.max(
+    0,
+    Math.trunc(Number(user.guaranteedUpgrades) || 0),
+  )
+  const guaranteedAtStart = guaranteedLeft
   const compensationTotal = 0
 
   for (const drop of selected) {
     const baseSkin = SKIN_BY_ID.get(drop.currentDrop.id) || drop.currentDrop
     const targetValue = Math.max(1, baseSkin.price * multiplier)
     const targetSkin = pickNearestSkinByPrice(targetValue)
-    const chance = glyphUpgradeChance(
-      baseSkin.price,
-      targetSkin?.price ?? baseSkin.price,
-    )
+    const guaranteed = guaranteedLeft > 0 && Boolean(targetSkin)
+    const chance = guaranteed
+      ? 100
+      : glyphUpgradeChance(
+          baseSkin.price,
+          targetSkin?.price ?? baseSkin.price,
+        )
     const roll = crypto.randomInt(0, 10000) / 100
-    const won = roll < chance && Boolean(targetSkin)
+    const won = guaranteed || (roll < chance && Boolean(targetSkin))
+    if (guaranteed) guaranteedLeft -= 1
     if (won) {
       drop.currentDrop = { ...targetSkin }
       drop.rollId = crypto.randomUUID()
@@ -3560,6 +3607,7 @@ app.post('/api/glyph/upgrade', auth, (req, res) => {
         won: true,
         chance,
         roll,
+        guaranteed,
         baseSkin: { ...baseSkin },
         targetSkin: { ...targetSkin },
         targetValue: roundGold(targetValue),
@@ -3575,6 +3623,7 @@ app.post('/api/glyph/upgrade', auth, (req, res) => {
         won: false,
         chance,
         roll,
+        guaranteed: false,
         baseSkin: { ...baseSkin },
         targetSkin: targetSkin ? { ...targetSkin } : null,
         targetValue: roundGold(targetValue),
@@ -3583,6 +3632,8 @@ app.post('/api/glyph/upgrade', auth, (req, res) => {
       losses += 1
     }
   }
+  user.guaranteedUpgrades = Math.max(0, guaranteedLeft)
+  const guaranteedUsed = guaranteedAtStart - guaranteedLeft
 
   const attemptsBurned = false
 
@@ -3597,13 +3648,15 @@ app.post('/api/glyph/upgrade', auth, (req, res) => {
     wins,
     losses,
     attemptsBurned,
+    guaranteedUsed,
+    guaranteedLeft,
     compensationTotal,
     selectedCount: selected.length,
     glyphDrop: publicGlyphDrop(user),
     remaining,
     user: publicUser(user),
     daily: buildDaily(),
-    message: `x${multiplier}: успешно ${wins} из ${selected.length}${compensationTotal > 0 ? ` · компенсация +${formatGold(compensationTotal)}` : ''}${losses > 0 ? ` · сгорело карт: ${losses}` : ''}${remaining > 0 ? ` · осталось карт: ${remaining}` : ''}`,
+    message: `x${multiplier}: успешно ${wins} из ${selected.length}${guaranteedUsed > 0 ? ` · гарант: ${guaranteedUsed}` : ''}${compensationTotal > 0 ? ` · компенсация +${formatGold(compensationTotal)}` : ''}${losses > 0 ? ` · сгорело карт: ${losses}` : ''}${remaining > 0 ? ` · осталось карт: ${remaining}` : ''}`,
   })
 })
 
@@ -3631,6 +3684,10 @@ app.post('/api/upgrade-many', auth, (req, res) => {
   const results = []
   let wins = 0
   let losses = 0
+  let guaranteedLeft = Math.max(
+    0,
+    Math.trunc(Number(user.guaranteedUpgrades) || 0),
+  )
 
   for (const entry of entries) {
     const baseSkin = SKIN_BY_ID.get(entry.skinId)
@@ -3641,9 +3698,11 @@ app.post('/api/upgrade-many', auth, (req, res) => {
     }
     const targetValue = Math.max(1, baseSkin.price * multiplier)
     const targetSkin = pickNearestSkinByPrice(targetValue)
-    const chance = glyphUpgradeChance(baseSkin.price, targetSkin?.price ?? baseSkin.price)
+    const guaranteed = guaranteedLeft > 0 && Boolean(targetSkin)
+    const chance = guaranteed ? 100 : glyphUpgradeChance(baseSkin.price, targetSkin?.price ?? baseSkin.price)
     const roll = crypto.randomInt(0, 10000) / 100
-    const won = roll < chance && Boolean(targetSkin)
+    const won = guaranteed || (roll < chance && Boolean(targetSkin))
+    if (guaranteed) guaranteedLeft -= 1
     user.inventory = user.inventory.filter((item) => item.instanceId !== entry.instanceId)
     if (won) {
       const newEntry = makeInventoryEntry(targetSkin)
@@ -3654,6 +3713,7 @@ app.post('/api/upgrade-many', auth, (req, res) => {
         won: true,
         chance,
         roll,
+        guaranteed,
         baseSkin: { ...baseSkin },
         targetSkin: { ...targetSkin },
         targetValue: roundGold(targetValue),
@@ -3665,6 +3725,7 @@ app.post('/api/upgrade-many', auth, (req, res) => {
         won: false,
         chance,
         roll,
+        guaranteed: false,
         baseSkin: { ...baseSkin },
         targetSkin: targetSkin ? { ...targetSkin } : null,
         targetValue: roundGold(targetValue),
@@ -3672,6 +3733,7 @@ app.post('/api/upgrade-many', auth, (req, res) => {
       losses += 1
     }
   }
+  user.guaranteedUpgrades = Math.max(0, guaranteedLeft)
 
   saveState()
 
@@ -3681,6 +3743,7 @@ app.post('/api/upgrade-many', auth, (req, res) => {
     results,
     wins,
     losses,
+    guaranteedLeft,
     user: publicUser(user),
     daily: buildDaily(),
     message: `x${multiplier}: успешно ${wins} из ${ids.length}`,
@@ -4021,7 +4084,9 @@ app.post('/api/promos', auth, (req, res) => {
     message:
       promo.type === 'deposit_percent'
         ? `Промокод ${promo.code} создан: +${promo.percent}% к пополнению`
-        : `Промокод ${promo.code} создан на ${formatGold(promo.amount)}`,
+        : promo.type === 'guaranteed_upgrades'
+          ? `Чит-код ${promo.code} создан: ${promo.upgrades} гарантированных апгрейдов`
+          : `Промокод ${promo.code} создан на ${formatGold(promo.amount)}`,
   })
 })
 
@@ -4044,9 +4109,12 @@ app.post('/api/promos/activate', auth, (req, res) => {
     return sendError(res, 400, 'PROMO_EXHAUSTED', 'У промокода закончились активации')
   }
 
-  const type = promo.type === 'deposit_percent' ? 'deposit_percent' : 'gold'
+  const type = ['deposit_percent', 'guaranteed_upgrades'].includes(promo.type)
+    ? promo.type
+    : 'gold'
   let message = ''
   let appliedPercent = 0
+  let appliedUpgrades = 0
 
   if (type === 'deposit_percent') {
     const percent = Math.max(1, Math.min(PROMO_MAX_PERCENT, Math.trunc(Number(promo.percent) || 0)))
@@ -4065,6 +4133,16 @@ app.post('/api/promos/activate', auth, (req, res) => {
       percent >= currentPercent
         ? `Промокод активирован: +${percent}% к следующему пополнению`
         : `Промокод активирован. Уже действует +${appliedPercent}% к пополнению`
+  } else if (type === 'guaranteed_upgrades') {
+    appliedUpgrades = Math.max(
+      1,
+      Math.min(PROMO_MAX_GUARANTEED_UPGRADES, Math.trunc(Number(promo.upgrades) || 1)),
+    )
+    user.guaranteedUpgrades = Math.min(
+      GUARANTEED_UPGRADE_CAP,
+      Math.max(0, Math.trunc(Number(user.guaranteedUpgrades) || 0)) + appliedUpgrades,
+    )
+    message = `Чит-код активирован: +${appliedUpgrades} гарантированных апгрейдов`
   } else {
     user.balance = roundGold(user.balance + promo.amount)
     message = `Промокод активирован: +${formatGold(promo.amount)}`
@@ -4079,8 +4157,16 @@ app.post('/api/promos/activate', auth, (req, res) => {
     ok: true,
     amount: type === 'gold' ? promo.amount : 0,
     percent: type === 'deposit_percent' ? promo.percent : 0,
+    upgrades: type === 'guaranteed_upgrades' ? appliedUpgrades : 0,
     appliedPercent,
-    promo: { code: promo.code, type, amount: promo.amount, percent: promo.percent },
+    appliedUpgrades,
+    promo: {
+      code: promo.code,
+      type,
+      amount: promo.amount,
+      percent: promo.percent,
+      upgrades: promo.upgrades,
+    },
     user: publicUser(user),
     promos: publicPromos(user),
     message,
@@ -4141,12 +4227,20 @@ app.post('/api/upgrade', auth, (req, res) => {
     })
   }
 
-  const chance = Math.min(
-    90,
-    Math.max(1, Math.round(((baseTotal + boost) / targetSkin.price) * 90 * 100) / 100),
+  const guaranteedLeft = Math.max(
+    0,
+    Math.trunc(Number(user.guaranteedUpgrades) || 0),
   )
+  const guaranteed = guaranteedLeft > 0
+  const chance = guaranteed
+    ? 100
+    : Math.min(
+        90,
+        Math.max(1, Math.round(((baseTotal + boost) / targetSkin.price) * 90 * 100) / 100),
+      )
   const roll = crypto.randomInt(0, 10000) / 100
-  const won = roll < chance
+  const won = guaranteed || roll < chance
+  if (guaranteed) user.guaranteedUpgrades = guaranteedLeft - 1
 
   const consumed = new Set(instanceIds)
   user.inventory = user.inventory.filter((entry) => !consumed.has(entry.instanceId))
@@ -4170,6 +4264,7 @@ app.post('/api/upgrade', auth, (req, res) => {
     won,
     chance,
     boost,
+    guaranteed,
     compensation,
     baseSkin: { ...baseSkins[0] },
     baseSkins: baseSkins.map((skin) => ({ ...skin })),
@@ -4186,6 +4281,8 @@ app.post('/api/upgrade', auth, (req, res) => {
     won,
     chance,
     boost,
+    guaranteed,
+    guaranteedLeft: Math.max(0, Math.trunc(Number(user.guaranteedUpgrades) || 0)),
     compensation,
     roll,
     baseSkin: baseSkins[0],
@@ -4196,7 +4293,9 @@ app.post('/api/upgrade', auth, (req, res) => {
     user: publicUser(user),
     daily: buildDaily(),
     message: won
-      ? `Апгрейд успешен: ${targetSkin.name}`
+      ? guaranteed
+        ? `Гарантированный апгрейд: ${targetSkin.name}`
+        : `Апгрейд успешен: ${targetSkin.name}`
       : compensation > 0
         ? `Апгрейд не удался · компенсация +${formatGold(compensation)}`
         : 'Апгрейд не удался',
