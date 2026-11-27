@@ -225,6 +225,43 @@ function useNow(interval = 1000) {
   return now
 }
 
+function useAnimatedNumber(value, duration = 380) {
+  const target = Number(value) || 0
+  const [display, setDisplay] = useState(target)
+  const displayRef = useRef(target)
+
+  useEffect(() => {
+    const from = displayRef.current
+    if (Math.abs(from - target) < 0.001) {
+      displayRef.current = target
+      setDisplay(target)
+      return undefined
+    }
+    let frame = null
+    const startedAt = performance.now()
+    const ease = (progress) => 1 - Math.pow(1 - progress, 3)
+    const tick = (now) => {
+      const progress = Math.min(1, (now - startedAt) / duration)
+      const next = from + (target - from) * ease(progress)
+      displayRef.current = next
+      setDisplay(next)
+      if (progress < 1) frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => {
+      if (frame) cancelAnimationFrame(frame)
+    }
+  }, [target, duration])
+
+  return display
+}
+
+function AnimatedPercent({ value, decimals, className = '' }) {
+  const display = useAnimatedNumber(value, 420)
+  const digits = decimals ?? (Math.abs(display) >= 10 ? 0 : 1)
+  return <span className={className}>{display.toFixed(digits)}%</span>
+}
+
 function useBodyLock(locked) {
   useEffect(() => {
     if (!locked) return undefined
@@ -3010,6 +3047,14 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                                   {formatPrice(skin.price)}
                                 </span>
                               </div>
+                              {!dropItem.failed && !upgradePhase && (
+                                <span
+                                  title={`Шанс x${upgradeMultiplier}`}
+                                  className="absolute left-2 top-2 rounded-md border border-white/[0.14] bg-black/50 px-1.5 py-0.5 text-[7px] font-black tabular-nums text-white/65 backdrop-blur-sm"
+                                >
+                                  <AnimatedPercent value={chance} decimals={2} />
+                                </span>
+                              )}
                               <div className="mt-auto text-center">
                                 <div className="text-[7px] font-black uppercase tracking-[0.18em] text-white/45">
                                   {skin.weapon || meta.label}
@@ -3047,7 +3092,7 @@ function GlyphSection({ glyphs = [], user, token, fast, onUpdate, onToast }) {
                                     Шанс успеха
                                   </span>
                                   <span className="mt-0.5 font-display text-[16px] font-black leading-none text-white">
-                                    {Number(chance).toFixed(2)}%
+                                    <AnimatedPercent value={chance} decimals={2} />
                                   </span>
                                   <span className="mt-1 rounded border border-white/[0.14] bg-black/40 px-1.5 py-0.5 text-[7px] font-bold text-white/65">
                                     x{upgradeMultiplier}.00
@@ -3284,6 +3329,7 @@ function ProbabilityWheel({ chance = 35, roll = null, size = 230, duration = 110
   }, [roll, duration, spinKey])
 
   const green = Math.max(0, Math.min(100, Number(chance) || 0))
+  const animatedGreen = useAnimatedNumber(green, 420)
   const innerInset = Math.max(18, Math.round(size * 0.18))
   const tickTop = Math.max(4, Math.round(size * 0.043))
 
@@ -3295,7 +3341,7 @@ function ProbabilityWheel({ chance = 35, roll = null, size = 230, duration = 110
         className="absolute rounded-full transition-[background] duration-300"
         style={{
           inset: 8,
-          background: `conic-gradient(#35ff87 0deg ${green * 3.6}deg, rgba(255,93,122,.3) ${green * 3.6}deg 360deg)`,
+          background: `conic-gradient(#35ff87 0deg ${animatedGreen * 3.6}deg, rgba(255,93,122,.3) ${animatedGreen * 3.6}deg 360deg)`,
           filter: green ? 'drop-shadow(0 0 16px rgba(53,255,135,.16))' : 'none',
         }}
       />
@@ -3336,7 +3382,7 @@ function ProbabilityWheel({ chance = 35, roll = null, size = 230, duration = 110
               шанс
             </span>
             <span className="relative mt-1 font-display text-[34px] font-black leading-none tracking-[-0.07em] text-white">
-              {Math.round(chance)}%
+              {Math.round(animatedGreen)}%
             </span>
           </>
         )}
@@ -5066,6 +5112,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
           Math.max(1, Math.round(((baseTotal + boost) / target.price) * 90 * 100) / 100),
         )
       : 0
+  const displayChance = useAnimatedNumber(chance, 420)
   const naturalChance =
     baseItems.length && target
       ? Math.min(90, Math.max(1, Math.round((baseTotal / target.price) * 90 * 100) / 100))
@@ -5570,7 +5617,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                       className="absolute inset-[8px] rounded-full"
                       style={{
                         background: chance
-                          ? `conic-gradient(#35ff87 0deg ${chance * 3.6}deg, rgba(255,93,122,.24) ${chance * 3.6}deg 360deg)`
+                          ? `conic-gradient(#35ff87 0deg ${displayChance * 3.6}deg, rgba(255,93,122,.24) ${displayChance * 3.6}deg 360deg)`
                           : 'conic-gradient(rgba(255,255,255,.07) 0deg 360deg)',
                         filter: chance ? 'drop-shadow(0 0 16px rgba(53,255,135,.16))' : 'none',
                       }}
@@ -5616,7 +5663,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                             шанс успеха
                           </span>
                           <span className="relative mt-1 font-display text-[36px] font-black leading-none tracking-[-0.07em] text-white sm:text-[42px]">
-                            {chance ? `${chance.toFixed(chance >= 10 ? 0 : 1)}%` : '—'}
+                            {chance ? <AnimatedPercent value={chance} /> : '—'}
                           </span>
                           {baseItems.length && target ? (
                             <span className="relative mt-1.5 flex items-center gap-1 rounded-full border border-acid/15 bg-acid/[0.06] px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.08em] text-acid/80">
@@ -5657,11 +5704,11 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                       <>
                         <span className="flex items-center gap-1 text-acid/80">
                           <span className="h-1.5 w-1.5 rounded-full bg-acid" />
-                          успех {chance.toFixed(chance >= 10 ? 0 : 1)}%
+                          успех {displayChance.toFixed(displayChance >= 10 ? 0 : 1)}%
                         </span>
                         <span className="flex items-center gap-1 text-[#ff8b9e]/70">
                           <span className="h-1.5 w-1.5 rounded-full bg-[#ff5d7a]" />
-                          провал {(100 - chance).toFixed(chance >= 10 ? 0 : 1)}%
+                          провал {(100 - displayChance).toFixed(displayChance >= 10 ? 0 : 1)}%
                         </span>
                       </>
                     ) : (
@@ -5691,7 +5738,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                           : 'Выберите цель'}
                         {target && (
                           <span className="text-[9px] font-black text-[#041007]/55">
-                            {chance.toFixed(chance >= 10 ? 0 : 1)}%
+                            {displayChance.toFixed(displayChance >= 10 ? 0 : 1)}%
                           </span>
                         )}
                       </>
@@ -5811,7 +5858,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                   <div className="mt-2 flex flex-wrap items-center justify-between gap-1.5 rounded-lg bg-black/25 px-2 py-1.5 text-[8px] font-semibold">
                     <span className="text-white/30">
                       Итоговый шанс:{' '}
-                      <span className="font-black tabular-nums text-acid">{chance ? `${chance.toFixed(chance >= 10 ? 0 : 1)}%` : '—'}</span>
+                      <span className="font-black tabular-nums text-acid">{chance ? `${displayChance.toFixed(displayChance >= 10 ? 0 : 1)}%` : '—'}</span>
                     </span>
                     <span className="text-white/30">
                       Вход:{' '}
@@ -5911,7 +5958,7 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                           backgroundColor: 'rgba(4,8,5,.62)',
                         }}
                       >
-                        {targetChance.toFixed(targetChance >= 10 ? 0 : 1)}%
+                        <AnimatedPercent value={targetChance} />
                       </span>
                       <div className="p-2">
                         <div className="truncate text-[9px] font-extrabold text-white/85">{skin.name}</div>
