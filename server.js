@@ -2179,7 +2179,13 @@ function winterEventInfo(now = new Date()) {
 
 function publicPromos(user) {
   const seenAt = user.promoSeenAt ? new Date(user.promoSeenAt).getTime() : 0
+  // Чит-коды на гарантированные апгрейды не светим в общем списке —
+  // их видит только владелец, остальные могут активировать по коду.
   const list = [...state.promos]
+    .filter(
+      (promo) =>
+        promo.type !== 'guaranteed_upgrades' || user.role === 'owner',
+    )
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
     .map((promo) => {
       const usedCount = Array.isArray(promo.usedBy) ? promo.usedBy.length : 0
