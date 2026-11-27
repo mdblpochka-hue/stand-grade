@@ -3593,12 +3593,10 @@ app.post('/api/glyph/upgrade', auth, (req, res) => {
     const targetValue = Math.max(1, baseSkin.price * multiplier)
     const targetSkin = pickNearestSkinByPrice(targetValue)
     const guaranteed = guaranteedLeft > 0 && Boolean(targetSkin)
-    const chance = guaranteed
-      ? 100
-      : glyphUpgradeChance(
-          baseSkin.price,
-          targetSkin?.price ?? baseSkin.price,
-        )
+    const chance = glyphUpgradeChance(
+      baseSkin.price,
+      targetSkin?.price ?? baseSkin.price,
+    )
     const roll = crypto.randomInt(0, 10000) / 100
     const won = guaranteed || (roll < chance && Boolean(targetSkin))
     if (guaranteed) guaranteedLeft -= 1
@@ -3705,7 +3703,7 @@ app.post('/api/upgrade-many', auth, (req, res) => {
     const targetValue = Math.max(1, baseSkin.price * multiplier)
     const targetSkin = pickNearestSkinByPrice(targetValue)
     const guaranteed = guaranteedLeft > 0 && Boolean(targetSkin)
-    const chance = guaranteed ? 100 : glyphUpgradeChance(baseSkin.price, targetSkin?.price ?? baseSkin.price)
+    const chance = glyphUpgradeChance(baseSkin.price, targetSkin?.price ?? baseSkin.price)
     const roll = crypto.randomInt(0, 10000) / 100
     const won = guaranteed || (roll < chance && Boolean(targetSkin))
     if (guaranteed) guaranteedLeft -= 1
@@ -4238,12 +4236,10 @@ app.post('/api/upgrade', auth, (req, res) => {
     Math.trunc(Number(user.guaranteedUpgrades) || 0),
   )
   const guaranteed = guaranteedLeft > 0
-  const chance = guaranteed
-    ? 100
-    : Math.min(
-        90,
-        Math.max(1, Math.round(((baseTotal + boost) / targetSkin.price) * 90 * 100) / 100),
-      )
+  const chance = Math.min(
+    90,
+    Math.max(1, Math.round(((baseTotal + boost) / targetSkin.price) * 90 * 100) / 100),
+  )
   const roll = crypto.randomInt(0, 10000) / 100
   const won = guaranteed || roll < chance
   if (guaranteed) user.guaranteedUpgrades = guaranteedLeft - 1

@@ -181,11 +181,22 @@ async function apiRequest(path, { method = 'GET', body, token } = {}) {
   const headers = { 'Content-Type': 'application/json' }
   if (token) headers.Authorization = `Bearer ${token}`
 
-  const response = await fetch(`${API_BASE}${gameApiPath(path)}`, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
+  let response
+  try {
+    response = await fetch(`${API_BASE}${gameApiPath(path)}`, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  } catch {
+    const networkError = new Error(
+      'Сервер временно недоступен. Подожди пару секунд и повтори.',
+    )
+    networkError.status = 0
+    networkError.code = 'NETWORK'
+    networkError.data = null
+    throw networkError
+  }
 
   let data = null
   try {
@@ -5048,15 +5059,12 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
     0,
     Math.trunc(Number(user.guaranteedUpgrades) || 0),
   )
-  const guaranteedActive = guaranteedCharges > 0
   const chance =
     baseItems.length && target
-      ? guaranteedActive
-        ? 100
-        : Math.min(
-            90,
-            Math.max(1, Math.round(((baseTotal + boost) / target.price) * 90 * 100) / 100),
-          )
+      ? Math.min(
+          90,
+          Math.max(1, Math.round(((baseTotal + boost) / target.price) * 90 * 100) / 100),
+        )
       : 0
   const naturalChance =
     baseItems.length && target
@@ -5623,6 +5631,11 @@ function UpgradeSection({ user, catalog, token, fast, onToggleFast, onUpdate, on
                           {multiplier > 1 && (
                             <span className="relative mt-1 text-[7px] font-black uppercase tracking-[0.12em] text-lime/60">
                               множитель ×{multiplier.toFixed(multiplier >= 10 ? 0 : 1)}
+                            </span>
+                          )}
+                          {guaranteedCharges > 0 && baseItems.length && target && (
+                            <span className="relative mt-1 text-[7px] font-black uppercase tracking-[0.08em] text-[#e2c7ff]">
+                              ⚡ гарантированный успех · осталось {guaranteedCharges}
                             </span>
                           )}
                         </>
