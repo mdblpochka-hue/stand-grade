@@ -1595,6 +1595,41 @@ function Header({
           </div>
         </div>
       </div>
+
+      <div className="border-t border-white/[0.055] bg-[#070b08]/95 md:hidden">
+        <div className="mx-auto max-w-[1540px] px-3 py-1.5">
+          <div className="grid grid-cols-2 gap-1 rounded-xl border border-white/[0.08] bg-black/30 p-1">
+            <button
+              type="button"
+              onClick={() => onSwitchMode?.('stand')}
+              aria-pressed={game === 'stand'}
+              className={cx(
+                'flex h-8 items-center justify-center gap-1.5 rounded-lg text-[9px] font-black uppercase tracking-[0.1em] transition',
+                game === 'stand'
+                  ? 'bg-acid/[0.14] text-acid shadow-[inset_0_0_0_1px_rgba(53,255,135,.18)]'
+                  : 'text-white/38 hover:bg-white/[0.04] hover:text-white/70',
+              )}
+            >
+              <Icon name="shield" size={11} />
+              StandGrade
+            </button>
+            <button
+              type="button"
+              onClick={() => onSwitchMode?.('cs2')}
+              aria-pressed={game === 'cs2'}
+              className={cx(
+                'flex h-8 items-center justify-center gap-1.5 rounded-lg text-[9px] font-black uppercase tracking-[0.1em] transition',
+                game === 'cs2'
+                  ? 'bg-acid/[0.14] text-acid shadow-[inset_0_0_0_1px_rgba(53,255,135,.18)]'
+                  : 'text-white/38 hover:bg-white/[0.04] hover:text-white/70',
+              )}
+            >
+              <Icon name="bolt" size={11} />
+              CS2 Drop
+            </button>
+          </div>
+        </div>
+      </div>
     </header>
   )
 }
